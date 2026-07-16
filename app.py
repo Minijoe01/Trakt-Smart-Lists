@@ -89,7 +89,7 @@ def generer_qr_code(url):
 # ==================================================
 
 try:
-    st.image("trakt-logo.svg", width=200)
+    st.image("trakt-logo.svg", width=150)
 except Exception:
     pass
 
