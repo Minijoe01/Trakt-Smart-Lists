@@ -82,13 +82,14 @@ def rafraichir_token(refresh_token):
     return response.json()
 
 
+
 def sauvegarder_connexion(tokens):
     """Enregistre les tokens en mémoire ET dans un cookie,
     pour que la connexion survive à un rechargement de page."""
-
     st.session_state["access_token"] = tokens["access_token"]
     st.session_state["refresh_token"] = tokens["refresh_token"]
     cookies.set("trakt_refresh_token", tokens["refresh_token"])
+    time.sleep(0.5)
 
 
 def obtenir_pseudo_trakt(access_token):
