@@ -126,11 +126,10 @@ if "access_token" not in st.session_state:
 
     refresh_token_sauvegarde = cookies.get("trakt_refresh_token")
 
-    if refresh_token_sauvegarde:
+if refresh_token_sauvegarde:
         tokens = rafraichir_token(refresh_token_sauvegarde)
         if tokens:
             sauvegarder_connexion(tokens)
-            st.rerun()
         else:
             cookies.remove("trakt_refresh_token")
 
