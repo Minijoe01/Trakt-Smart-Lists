@@ -91,6 +91,13 @@ def sauvegarder_connexion(tokens):
     time.sleep(0.5)
 
 
+def oublier_connexion():
+    """Supprime le cookie et la session, proprement (avec le même délai que pour l'écriture)."""
+    cookies.remove("trakt_refresh_token")
+    time.sleep(0.5)
+    st.session_state.clear()
+
+
 def obtenir_pseudo_trakt(access_token):
     """Récupère le pseudo de l'utilisateur connecté, pour confirmer que ça fonctionne."""
 
@@ -225,6 +232,5 @@ else:
     st.success(f"Connecté à Trakt en tant que **{pseudo}** ✅")
 
     if st.button("Se déconnecter"):
-        cookies.remove("trakt_refresh_token")
-        st.session_state.clear()
+        oublier_connexion()
         st.rerun()
