@@ -3,8 +3,11 @@ import requests
 import time
 import qrcode
 import io
+from streamlit_cookies_controller import CookieController
 
 st.set_page_config(page_title="Trakt Smart Lists", page_icon="🎬")
+
+cookies = CookieController()
 
 # ==================================================
 # CONFIGURATION (lue depuis les secrets Streamlit)
@@ -15,6 +18,7 @@ CLIENT_SECRET = st.secrets["TRAKT_CLIENT_SECRET"]
 
 DEVICE_CODE_URL = "https://api.trakt.tv/oauth/device/code"
 DEVICE_TOKEN_URL = "https://api.trakt.tv/oauth/device/token"
+REFRESH_TOKEN_URL = "https://api.trakt.tv/oauth/token"
 
 
 # ==================================================
@@ -58,6 +62,35 @@ def verifier_connexion(device_code):
     return None  # toujours en attente
 
 
+def rafraichir_token(refresh_token):
+    """Utilise un refresh_token sauvegardé pour obtenir un nouvel access_token,
+    sans repasser par tout le processus de connexion. Retourne None si ça échoue."""
+
+    payload = {
+        "refresh_token": refresh_token,
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
+        "grant_type": "refresh_token",
+    }
+
+    response = requests.post(REFRESH_TOKEN_URL, json=payload)
+
+    if response.status_code != 200:
+        return None
+
+    return response.json()
+
+
+def sauvegarder_connexion(tokens):
+    """Enregistre les tokens en mémoire ET dans un cookie,
+    pour que la connexion survive à un rechargement de page."""
+
+    st.session_state["access_token"] = tokens["access_token"]
+    st.session_state["refresh_token"] = tokens["refresh_token"]
+    cookies.set("trakt_refresh_token", tokens["refresh_token"])
+
+
 def obtenir_pseudo_trakt(access_token):
     """Récupère le pseudo de l'utilisateur connecté, pour confirmer que ça fonctionne."""
 
@@ -82,6 +115,23 @@ def generer_qr_code(url):
     image.save(buffer, format="PNG")
 
     return buffer.getvalue()
+
+
+# ==================================================
+# RECONNEXION AUTOMATIQUE (si déjà connecté avant)
+# ==================================================
+
+if "access_token" not in st.session_state:
+
+    refresh_token_sauvegarde = cookies.get("trakt_refresh_token")
+
+    if refresh_token_sauvegarde:
+        tokens = rafraichir_token(refresh_token_sauvegarde)
+        if tokens:
+            sauvegarder_connexion(tokens)
+            st.rerun()
+        else:
+            cookies.remove("trakt_refresh_token")
 
 
 # ==================================================
@@ -155,8 +205,7 @@ if "access_token" not in st.session_state:
                     break
 
                 if tokens:
-                    st.session_state["access_token"] = tokens["access_token"]
-                    st.session_state["refresh_token"] = tokens["refresh_token"]
+                    sauvegarder_connexion(tokens)
                     del st.session_state["device_code"]
                     st.rerun()
 
@@ -177,5 +226,6 @@ else:
     st.success(f"Connecté à Trakt en tant que **{pseudo}** ✅")
 
     if st.button("Se déconnecter"):
+        cookies.remove("trakt_refresh_token")
         st.session_state.clear()
         st.rerun()
