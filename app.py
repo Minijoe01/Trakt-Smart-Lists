@@ -82,7 +82,6 @@ def rafraichir_token(refresh_token):
     return response.json()
 
 
-
 def sauvegarder_connexion(tokens):
     """Enregistre les tokens en mémoire ET dans un cookie,
     pour que la connexion survive à un rechargement de page."""
@@ -126,7 +125,7 @@ if "access_token" not in st.session_state:
 
     refresh_token_sauvegarde = cookies.get("trakt_refresh_token")
 
-if refresh_token_sauvegarde:
+    if refresh_token_sauvegarde:
         tokens = rafraichir_token(refresh_token_sauvegarde)
         if tokens:
             sauvegarder_connexion(tokens)
