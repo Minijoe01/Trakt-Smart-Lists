@@ -4,3 +4,4 @@ pandas
 openpyxl
 qrcode
 pillow
+streamlit-cookies-controller
