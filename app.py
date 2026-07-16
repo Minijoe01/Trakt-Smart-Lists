@@ -1,6 +1,8 @@
 import streamlit as st
 import requests
 import time
+import qrcode
+import io
 
 st.set_page_config(page_title="Trakt Smart Lists", page_icon="🎬")
 
@@ -72,11 +74,26 @@ def obtenir_pseudo_trakt(access_token):
     return response.json()["user"]["username"]
 
 
+def generer_qr_code(url):
+    """Génère un QR code en mémoire (aucun fichier écrit sur disque)."""
+
+    image = qrcode.make(url)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+
+    return buffer.getvalue()
+
+
 # ==================================================
 # INTERFACE
 # ==================================================
 
-st.title("🎬 Trakt Smart Lists")
+try:
+    st.image("trakt-logo.svg", width=200)
+except Exception:
+    pass
+
+st.title("Trakt Smart Lists")
 
 if "access_token" not in st.session_state:
 
@@ -97,12 +114,27 @@ if "access_token" not in st.session_state:
 
         url = st.session_state["verification_url"]
         code = st.session_state["user_code"]
+        url_complete = f"{url}/{code}"
 
-        st.markdown(f"**1.** Va sur : "
-                    f'<a href="{url}" target="_blank">{url}</a>',
-                    unsafe_allow_html=True)
-        st.markdown(f"**2.** Entre ce code : `{code}`")
-        st.caption("Tu peux faire ça sur ton téléphone si tu préfères. Garde cette page ouverte, elle se met à jour toute seule.")
+        st.write("Connecte-toi à Trakt avec l'une de ces options :")
+
+        colonne_gauche, colonne_droite = st.columns(2)
+
+        with colonne_gauche:
+            st.markdown(
+                f'<a href="{url_complete}" target="_blank" '
+                f'style="display:inline-block; background-color:#ED2224; color:white; '
+                f'padding:0.6em 1.4em; border-radius:8px; text-decoration:none; '
+                f'font-weight:600;">Ouvrir la page d\'autorisation</a>',
+                unsafe_allow_html=True,
+            )
+            st.caption("Sur cet appareil, ou un autre.")
+
+        with colonne_droite:
+            st.image(generer_qr_code(url_complete), width=150)
+            st.caption("Ou scanne avec ton téléphone.")
+
+        st.caption("Garde cette page ouverte : elle se met à jour toute seule dès que c'est approuvé.")
 
         with st.spinner("En attente de ton autorisation sur Trakt..."):
 
