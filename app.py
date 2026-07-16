@@ -130,16 +130,17 @@ def generer_qr_code(url):
 
 
 # ==================================================
-# FONCTIONS TRAKT — HISTORIQUE ET LISTES
+# FONCTIONS TRAKT — HISTORIQUE, LISTES, WATCHLIST
 # ==================================================
 
 def obtenir_historique(access_token, barre=None):
-    """Récupère tout l'historique de visionnage (films et séries), page par page."""
+    """Récupère tout l'historique de visionnage, avec quelques statistiques au passage."""
 
     headers = entetes_trakt(access_token)
-
     films = {}
     series = {}
+    nb_visionnages_films = 0
+    nb_episodes = 0
 
     premiere_page = requests.get(
         "https://api.trakt.tv/users/me/history",
@@ -147,13 +148,12 @@ def obtenir_historique(access_token, barre=None):
         params={"page": 1, "limit": 100},
     )
     premiere_page.raise_for_status()
-
     total_pages = int(premiere_page.headers.get("X-Pagination-Page-Count", 1))
 
     for page in range(1, total_pages + 1):
 
         if barre:
-            barre.progress(page / total_pages, text=f"Récupération de l'historique : page {page}/{total_pages}")
+            barre.progress(page / total_pages * 0.7, text=f"Récupération de l'historique : page {page}/{total_pages}")
 
         reponse = requests.get(
             "https://api.trakt.tv/users/me/history",
@@ -165,6 +165,7 @@ def obtenir_historique(access_token, barre=None):
         for item in reponse.json():
 
             if item["type"] == "movie":
+                nb_visionnages_films += 1
                 film = item["movie"]
                 identifiant = film["ids"]["trakt"]
 
@@ -179,6 +180,7 @@ def obtenir_historique(access_token, barre=None):
                     films[identifiant]["vues"] += 1
 
             elif item["type"] == "episode":
+                nb_episodes += 1
                 serie = item["show"]
                 identifiant = serie["ids"]["trakt"]
 
@@ -192,7 +194,14 @@ def obtenir_historique(access_token, barre=None):
                 else:
                     series[identifiant]["vues"] += 1
 
-    return {"films": films, "series": series}
+    return {
+        "films": films,
+        "series": series,
+        "nb_films": len(films),
+        "nb_series": len(series),
+        "nb_visionnages_films": nb_visionnages_films,
+        "nb_episodes": nb_episodes,
+    }
 
 
 def obtenir_listes(access_token):
@@ -205,15 +214,13 @@ def obtenir_listes(access_token):
 
 
 def obtenir_contenu_liste(access_token, list_id):
-    """Récupère tous les éléments d'une liste (avec pagination)."""
+    """Récupère tous les éléments d'une liste personnalisée (avec pagination)."""
 
     headers = entetes_trakt(access_token)
-
     items_total = []
     page = 1
 
     while True:
-
         reponse = requests.get(
             f"https://api.trakt.tv/users/me/lists/{list_id}/items",
             headers=headers,
@@ -231,56 +238,102 @@ def obtenir_contenu_liste(access_token, list_id):
     return items_total
 
 
-def comparer_listes_historique(access_token, historique, barre=None):
-    """Compare chaque liste avec l'historique pour repérer les contenus déjà vus."""
+def obtenir_watchlist(access_token):
+    """Récupère la watchlist officielle (avec pagination)."""
+
+    headers = entetes_trakt(access_token)
+    items_total = []
+    page = 1
+
+    while True:
+        reponse = requests.get(
+            "https://api.trakt.tv/users/me/watchlist",
+            headers=headers,
+            params={"page": page, "limit": 100},
+        )
+        reponse.raise_for_status()
+        items = reponse.json()
+
+        if not items:
+            break
+
+        items_total.extend(items)
+        page += 1
+
+    return items_total
+
+
+def comparer_items_avec_historique(items, historique):
+    """Compare une liste d'items (peu importe leur source) avec l'historique de visionnage."""
 
     resultats = []
+
+    for item in items:
+
+        if item["type"] == "movie":
+            film = item["movie"]
+            identifiant = film["ids"]["trakt"]
+
+            if identifiant in historique["films"]:
+                vu = historique["films"][identifiant]
+                resultats.append({
+                    "type": "Film",
+                    "titre": film["title"],
+                    "annee": film["year"],
+                    "vues": vu["vues"],
+                    "dernier_visionnage": vu["dernier_visionnage"],
+                })
+
+        elif item["type"] == "show":
+            serie = item["show"]
+            identifiant = serie["ids"]["trakt"]
+
+            if identifiant in historique["series"]:
+                vu = historique["series"][identifiant]
+                resultats.append({
+                    "type": "Série",
+                    "titre": serie["title"],
+                    "annee": serie["year"],
+                    "vues": vu["vues"],
+                    "dernier_visionnage": vu["dernier_visionnage"],
+                })
+
+    return resultats
+
+
+def analyser_tout(access_token, historique, barre=None):
+    """Compare la watchlist + toutes les listes personnalisées avec l'historique.
+    Retourne le détail des contenus déjà vus, et des statistiques par liste."""
+
+    resultats = []
+    stats_listes = []
+
+    if barre:
+        barre.progress(0.7, text="Analyse de la watchlist...")
+
+    watchlist = obtenir_watchlist(access_token)
+    matches = comparer_items_avec_historique(watchlist, historique)
+    for m in matches:
+        m["liste"] = "Watchlist"
+    resultats.extend(matches)
+    stats_listes.append({"nom": "Watchlist (officielle)", "total": len(watchlist), "deja_vus": len(matches)})
+
     listes = obtenir_listes(access_token)
 
     for i, liste in enumerate(listes):
 
         if barre:
-            barre.progress((i + 1) / max(len(listes), 1), text=f"Analyse de la liste : {liste['name']}")
+            barre.progress(0.7 + (i + 1) / max(len(listes), 1) * 0.3, text=f"Analyse de la liste : {liste['name']}")
 
         items = obtenir_contenu_liste(access_token, liste["ids"]["trakt"])
+        matches = comparer_items_avec_historique(items, historique)
+        for m in matches:
+            m["liste"] = liste["name"]
+        resultats.extend(matches)
 
-        for item in items:
+        stats_listes.append({"nom": liste["name"], "total": len(items), "deja_vus": len(matches)})
 
-            if item["type"] == "movie":
-                film = item["movie"]
-                identifiant = film["ids"]["trakt"]
-
-                if identifiant in historique["films"]:
-                    vu = historique["films"][identifiant]
-                    resultats.append({
-                        "liste": liste["name"],
-                        "liste_id": liste["ids"]["trakt"],
-                        "type": "Film",
-                        "titre": film["title"],
-                        "annee": film["year"],
-                        "vues": vu["vues"],
-                        "dernier_visionnage": vu["dernier_visionnage"],
-                        "trakt_id": identifiant,
-                    })
-
-            elif item["type"] == "show":
-                serie = item["show"]
-                identifiant = serie["ids"]["trakt"]
-
-                if identifiant in historique["series"]:
-                    vu = historique["series"][identifiant]
-                    resultats.append({
-                        "liste": liste["name"],
-                        "liste_id": liste["ids"]["trakt"],
-                        "type": "Série",
-                        "titre": serie["title"],
-                        "annee": serie["year"],
-                        "vues": vu["vues"],
-                        "dernier_visionnage": vu["dernier_visionnage"],
-                        "trakt_id": identifiant,
-                    })
-
-    return resultats
+    return resultats, stats_listes
 
 
 # ==================================================
@@ -397,39 +450,71 @@ else:
             st.rerun()
 
     st.divider()
-    st.subheader("🧹 Nettoyage des listes")
 
     if "resultats" not in st.session_state:
 
-        st.write("Compare tes listes à ton historique pour repérer ce que tu as déjà vu.")
+        st.write("Compare ta watchlist et tes listes à ton historique pour repérer ce que tu as déjà vu.")
 
-        if st.button("🔍 Analyser mes listes"):
+        if st.button("🔍 Analyser"):
 
             barre = st.progress(0, text="Démarrage...")
 
             historique = obtenir_historique(st.session_state["access_token"], barre)
+            resultats, stats_listes = analyser_tout(st.session_state["access_token"], historique, barre)
 
-            resultats = comparer_listes_historique(st.session_state["access_token"], historique, barre)
-
+            st.session_state["historique"] = historique
             st.session_state["resultats"] = resultats
+            st.session_state["stats_listes"] = stats_listes
 
             barre.empty()
             st.rerun()
 
     else:
 
+        historique = st.session_state["historique"]
         resultats = st.session_state["resultats"]
+        stats_listes = st.session_state["stats_listes"]
+
+        st.subheader("📊 Statistiques")
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Films vus", historique["nb_films"])
+        col2.metric("Séries vues", historique["nb_series"])
+        col3.metric("Épisodes vus", historique["nb_episodes"])
+        col4.metric("Listes personnalisées", len(stats_listes) - 1)
+
+        total_items = sum(s["total"] for s in stats_listes)
+        total_deja_vus = sum(s["deja_vus"] for s in stats_listes)
+        pourcentage_global = round(total_deja_vus / total_items * 100, 1) if total_items else 0
+
+        col5, col6, col7 = st.columns(3)
+        col5.metric("Contenus dans tes listes + watchlist", total_items)
+        col6.metric("Déjà vus (tous confondus)", total_deja_vus)
+        col7.metric("% potentiellement nettoyable", f"{pourcentage_global}%")
+
+        df_stats_listes = pd.DataFrame(stats_listes)
+        df_stats_listes["% nettoyable"] = (
+            df_stats_listes["deja_vus"] / df_stats_listes["total"].replace(0, 1) * 100
+        ).round(1)
+
+        st.bar_chart(df_stats_listes.set_index("nom")["% nettoyable"])
+
+        st.divider()
+        st.subheader("🧹 Contenus déjà vus")
 
         if not resultats:
-            st.info("Aucun contenu déjà vu trouvé dans tes listes. Tout est propre ! 🎉")
+            st.info("Aucun contenu déjà vu trouvé. Tout est propre ! 🎉")
         else:
             st.write(f"**{len(resultats)}** contenu(s) déjà vu(s) trouvé(s) :")
 
             tableau = pd.DataFrame(resultats)[["liste", "type", "titre", "annee", "vues", "dernier_visionnage"]]
+            tableau["dernier_visionnage"] = pd.to_datetime(tableau["dernier_visionnage"]).dt.strftime("%d/%m/%Y")
             tableau.columns = ["Liste", "Type", "Titre", "Année", "Vues", "Dernier visionnage"]
 
             st.dataframe(tableau, use_container_width=True, hide_index=True)
 
         if st.button("🔄 Relancer l'analyse"):
+            del st.session_state["historique"]
             del st.session_state["resultats"]
+            del st.session_state["stats_listes"]
             st.rerun()
