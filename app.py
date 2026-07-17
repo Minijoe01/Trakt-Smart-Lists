@@ -282,6 +282,7 @@ def comparer_items_avec_historique(items, historique):
                     "annee": film["year"],
                     "vues": vu["vues"],
                     "dernier_visionnage": vu["dernier_visionnage"],
+                    "trakt_id": identifiant,
                 })
 
         elif item["type"] == "show":
@@ -296,6 +297,7 @@ def comparer_items_avec_historique(items, historique):
                     "annee": serie["year"],
                     "vues": vu["vues"],
                     "dernier_visionnage": vu["dernier_visionnage"],
+                    "trakt_id": identifiant,
                 })
 
     return resultats
@@ -315,6 +317,7 @@ def analyser_tout(access_token, historique, barre=None):
     matches = comparer_items_avec_historique(watchlist, historique)
     for m in matches:
         m["liste"] = "Watchlist"
+        m["liste_id"] = "watchlist"
     resultats.extend(matches)
     stats_listes.append({"nom": "Watchlist (officielle)", "total": len(watchlist), "deja_vus": len(matches)})
 
@@ -329,11 +332,46 @@ def analyser_tout(access_token, historique, barre=None):
         matches = comparer_items_avec_historique(items, historique)
         for m in matches:
             m["liste"] = liste["name"]
+            m["liste_id"] = liste["ids"]["trakt"]
         resultats.extend(matches)
 
         stats_listes.append({"nom": liste["name"], "total": len(items), "deja_vus": len(matches)})
 
     return resultats, stats_listes
+
+
+# ==================================================
+# FONCTIONS TRAKT — SUPPRESSION
+# ==================================================
+
+def supprimer_de_liste(access_token, liste_id, items_a_supprimer):
+    """Supprime les films/séries sélectionnés d'une liste précise (ou de la watchlist)."""
+
+    corps = {"movies": [], "shows": []}
+
+    for item in items_a_supprimer:
+        cible = corps["movies"] if item["type"] == "Film" else corps["shows"]
+        cible.append({"ids": {"trakt": item["trakt_id"]}})
+
+    if liste_id == "watchlist":
+        url = "https://api.trakt.tv/sync/watchlist/remove"
+    else:
+        url = f"https://api.trakt.tv/users/me/lists/{liste_id}/items/remove"
+
+    reponse = requests.post(url, headers=entetes_trakt(access_token), json=corps)
+    reponse.raise_for_status()
+
+
+def supprimer_selection(access_token, items_selectionnes):
+    """Supprime les éléments sélectionnés, liste par liste (un appel par liste concernée)."""
+
+    par_liste = {}
+    for item in items_selectionnes:
+        par_liste.setdefault(item["liste_id"], []).append(item)
+
+    for liste_id, items in par_liste.items():
+        supprimer_de_liste(access_token, liste_id, items)
+        time.sleep(1)
 
 
 # ==================================================
@@ -505,13 +543,60 @@ else:
         if not resultats:
             st.info("Aucun contenu déjà vu trouvé. Tout est propre ! 🎉")
         else:
-            st.write(f"**{len(resultats)}** contenu(s) déjà vu(s) trouvé(s) :")
+            st.write(f"**{len(resultats)}** contenu(s) déjà vu(s) trouvé(s). Coche ceux à supprimer :")
 
-            tableau = pd.DataFrame(resultats)[["liste", "type", "titre", "annee", "vues", "dernier_visionnage"]]
-            tableau["dernier_visionnage"] = pd.to_datetime(tableau["dernier_visionnage"]).dt.strftime("%d/%m/%Y")
-            tableau.columns = ["Liste", "Type", "Titre", "Année", "Vues", "Dernier visionnage"]
+            tableau = pd.DataFrame(resultats)
+            tableau_affichage = tableau[["type", "titre", "annee", "vues", "dernier_visionnage", "liste"]].copy()
+            tableau_affichage["dernier_visionnage"] = pd.to_datetime(tableau_affichage["dernier_visionnage"]).dt.strftime("%d/%m/%Y")
+            tableau_affichage.insert(0, "Sélectionner", False)
+            tableau_affichage.columns = ["Sélectionner", "Type", "Titre", "Année", "Vues", "Dernier visionnage", "Liste"]
 
-            st.dataframe(tableau, use_container_width=True, hide_index=True)
+            edite = st.data_editor(
+                tableau_affichage,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["Type", "Titre", "Année", "Vues", "Dernier visionnage", "Liste"],
+                key="editeur_resultats",
+            )
+
+            nb_selectionnes = int(edite["Sélectionner"].sum())
+
+            if nb_selectionnes > 0:
+
+                if not st.session_state.get("confirmation_suppression", False):
+
+                    if st.button(f"🗑️ Supprimer les {nb_selectionnes} élément(s) sélectionné(s)"):
+                        st.session_state["confirmation_suppression"] = True
+                        st.rerun()
+
+                else:
+
+                    st.warning(f"Confirmer la suppression de {nb_selectionnes} élément(s) de tes listes Trakt ? Cette action est irréversible.")
+
+                    col_oui, col_non = st.columns(2)
+
+                    with col_oui:
+                        if st.button("✅ Oui, supprimer"):
+
+                            indices = edite[edite["Sélectionner"]].index
+                            items_a_supprimer = [resultats[i] for i in indices]
+
+                            with st.spinner("Suppression en cours..."):
+                                supprimer_selection(st.session_state["access_token"], items_a_supprimer)
+
+                            st.session_state["confirmation_suppression"] = False
+                            del st.session_state["historique"]
+                            del st.session_state["resultats"]
+                            del st.session_state["stats_listes"]
+
+                            st.success(f"{nb_selectionnes} élément(s) supprimé(s) !")
+                            time.sleep(1.5)
+                            st.rerun()
+
+                    with col_non:
+                        if st.button("❌ Annuler"):
+                            st.session_state["confirmation_suppression"] = False
+                            st.rerun()
 
         if st.button("🔄 Relancer l'analyse"):
             del st.session_state["historique"]
