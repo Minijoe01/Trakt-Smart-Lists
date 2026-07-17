@@ -1,9 +1,9 @@
 [theme]
-# Thème : Aston Martin F1 2026 - Moderne, sobre, vert carbone
-primaryColor = "#008778" # Vert Aston Martin lumineux pour les éléments principaux
-backgroundColor = "#071816" # Fond vert très sombre / carbone Aston, pas noir pur
-secondaryBackgroundColor = "#0F2B28" # Fond des cartes et blocs, vert légèrement plus clair
-textColor = "#F0F7F6" # Blanc légèrement adouci, moins agressif pour les yeux
+# Thème Aston Martin F1 2026 - Style Cinopsys : vert profond, uniforme
+primaryColor = "#00A392" # Vert Aston principal
+backgroundColor = "#052F2C" # Fond vert très sombre UNIFORME, pas de dégradé trop marqué
+secondaryBackgroundColor = "rgba(8, 68, 63, 0.85)" # Fond des cartes : VERT ASTON TRANSPARENT (effet verre)
+textColor = "#F0FAF8"
 font = "sans serif"
 base = "dark"
 
