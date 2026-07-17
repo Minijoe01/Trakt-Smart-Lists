@@ -5,6 +5,11 @@ import qrcode
 import io
 import pandas as pd
 from streamlit_cookies_controller import CookieController
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.formatting.rule import ColorScaleRule
 
 st.set_page_config(page_title="Trakt Smart Lists", page_icon="🎬", layout="wide")
 
@@ -305,15 +310,28 @@ def comparer_items_avec_historique(items, historique):
 
 def analyser_tout(access_token, historique, barre=None):
     """Compare la watchlist + toutes les listes personnalisées avec l'historique.
-    Retourne le détail des contenus déjà vus, et des statistiques par liste."""
+    Retourne : les contenus déjà vus, les stats par liste, et les doublons entre listes."""
 
     resultats = []
     stats_listes = []
+    apparitions = {}
+
+    def enregistrer_apparition(trakt_id, titre, annee, type_, nom_liste):
+        if trakt_id not in apparitions:
+            apparitions[trakt_id] = {"titre": titre, "annee": annee, "type": type_, "listes": []}
+        apparitions[trakt_id]["listes"].append(nom_liste)
 
     if barre:
         barre.progress(0.7, text="Analyse de la watchlist...")
 
     watchlist = obtenir_watchlist(access_token)
+
+    for item in watchlist:
+        if item["type"] == "movie":
+            enregistrer_apparition(item["movie"]["ids"]["trakt"], item["movie"]["title"], item["movie"]["year"], "Film", "Watchlist")
+        elif item["type"] == "show":
+            enregistrer_apparition(item["show"]["ids"]["trakt"], item["show"]["title"], item["show"]["year"], "Série", "Watchlist")
+
     matches = comparer_items_avec_historique(watchlist, historique)
     for m in matches:
         m["liste"] = "Watchlist"
@@ -329,6 +347,13 @@ def analyser_tout(access_token, historique, barre=None):
             barre.progress(0.7 + (i + 1) / max(len(listes), 1) * 0.3, text=f"Analyse de la liste : {liste['name']}")
 
         items = obtenir_contenu_liste(access_token, liste["ids"]["trakt"])
+
+        for item in items:
+            if item["type"] == "movie":
+                enregistrer_apparition(item["movie"]["ids"]["trakt"], item["movie"]["title"], item["movie"]["year"], "Film", liste["name"])
+            elif item["type"] == "show":
+                enregistrer_apparition(item["show"]["ids"]["trakt"], item["show"]["title"], item["show"]["year"], "Série", liste["name"])
+
         matches = comparer_items_avec_historique(items, historique)
         for m in matches:
             m["liste"] = liste["name"]
@@ -337,7 +362,18 @@ def analyser_tout(access_token, historique, barre=None):
 
         stats_listes.append({"nom": liste["name"], "total": len(items), "deja_vus": len(matches)})
 
-    return resultats, stats_listes
+    doublons = []
+    for info in apparitions.values():
+        if len(info["listes"]) >= 2:
+            doublons.append({
+                "type": info["type"],
+                "titre": info["titre"],
+                "annee": info["annee"],
+                "nombre_listes": len(info["listes"]),
+                "listes": ", ".join(info["listes"]),
+            })
+
+    return resultats, stats_listes, doublons
 
 
 # ==================================================
@@ -372,6 +408,124 @@ def supprimer_selection(access_token, items_selectionnes):
     for liste_id, items in par_liste.items():
         supprimer_de_liste(access_token, liste_id, items)
         time.sleep(1)
+
+
+# ==================================================
+# FONCTIONS — EXPORT EXCEL
+# ==================================================
+
+def auto_ajuster_colonnes(ws):
+    """Ajuste automatiquement la largeur des colonnes selon leur contenu."""
+
+    for colonne in ws.columns:
+        longueur = 0
+        lettre = get_column_letter(colonne[0].column)
+        for cellule in colonne:
+            try:
+                if len(str(cellule.value)) > longueur:
+                    longueur = len(str(cellule.value))
+            except Exception:
+                pass
+        ws.column_dimensions[lettre].width = longueur + 4
+
+
+def mettre_en_forme_feuille(ws):
+    """Mise en forme générale : en-têtes stylées, figées, tableau filtrable, colonnes ajustées."""
+
+    ws.freeze_panes = "A2"
+
+    if ws.max_row > 1:
+        ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+        table = Table(displayName=f"Table_{ws.title.replace(' ', '_')}", ref=ref)
+        table.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium2",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False,
+        )
+        ws.add_table(table)
+
+    for cellule in ws[1]:
+        cellule.font = Font(bold=True, color="FFFFFF")
+        cellule.fill = PatternFill(start_color="ED2224", end_color="ED2224", fill_type="solid")
+        cellule.alignment = Alignment(horizontal="center")
+
+    auto_ajuster_colonnes(ws)
+
+
+def generer_excel(pseudo, historique, resultats, stats_listes, doublons):
+    """Génère le fichier Excel complet, en mémoire (aucun fichier écrit sur disque)."""
+
+    df_resume = pd.DataFrame([
+        ["Compte Trakt", pseudo],
+        ["Films vus", historique["nb_films"]],
+        ["Séries vues", historique["nb_series"]],
+        ["Épisodes vus", historique["nb_episodes"]],
+        ["Listes personnalisées", len(stats_listes) - 1],
+        ["Contenus dans tes listes + watchlist", sum(s["total"] for s in stats_listes)],
+        ["Contenus déjà vus à nettoyer", len(resultats)],
+        ["Doublons entre listes", len(doublons)],
+    ], columns=["Statistique", "Valeur"])
+
+    df_resultats = pd.DataFrame(resultats)
+    if not df_resultats.empty:
+        df_resultats = df_resultats[["liste", "type", "titre", "annee", "vues", "dernier_visionnage"]].copy()
+        df_resultats["dernier_visionnage"] = pd.to_datetime(df_resultats["dernier_visionnage"]).dt.strftime("%d/%m/%Y")
+        df_resultats.columns = ["Liste", "Type", "Titre", "Année", "Vues", "Dernier visionnage"]
+    else:
+        df_resultats = pd.DataFrame(columns=["Liste", "Type", "Titre", "Année", "Vues", "Dernier visionnage"])
+
+    df_doublons = pd.DataFrame(doublons)
+    if not df_doublons.empty:
+        df_doublons = df_doublons[["type", "titre", "annee", "nombre_listes", "listes"]].copy()
+        df_doublons.columns = ["Type", "Titre", "Année", "Nombre de listes", "Présent dans"]
+    else:
+        df_doublons = pd.DataFrame(columns=["Type", "Titre", "Année", "Nombre de listes", "Présent dans"])
+
+    df_listes = pd.DataFrame(stats_listes)
+    df_listes["% nettoyage possible"] = (
+        df_listes["deja_vus"] / df_listes["total"].replace(0, 1) * 100
+    ).round(1)
+    df_listes.columns = ["Liste", "Nombre de contenus", "Déjà vus", "% nettoyage possible"]
+
+    buffer = io.BytesIO()
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_resume.to_excel(writer, sheet_name="Résumé", index=False)
+        df_resultats.to_excel(writer, sheet_name="À nettoyer", index=False)
+        df_doublons.to_excel(writer, sheet_name="Doublons entre listes", index=False)
+        df_listes.to_excel(writer, sheet_name="Analyse par liste", index=False)
+
+    buffer.seek(0)
+    classeur = load_workbook(buffer)
+
+    for feuille in classeur:
+        mettre_en_forme_feuille(feuille)
+
+    colonne_pourcentage = None
+    ws_listes = classeur["Analyse par liste"]
+    for cellule in ws_listes[1]:
+        if cellule.value == "% nettoyage possible":
+            colonne_pourcentage = cellule.column
+            break
+
+    if colonne_pourcentage:
+        lettre = get_column_letter(colonne_pourcentage)
+        ws_listes.conditional_formatting.add(
+            f"{lettre}2:{lettre}{ws_listes.max_row}",
+            ColorScaleRule(
+                start_type="min", start_color="63BE7B",
+                mid_type="percentile", mid_value=50, mid_color="FFEB84",
+                end_type="max", end_color="F8696B",
+            ),
+        )
+
+    buffer_final = io.BytesIO()
+    classeur.save(buffer_final)
+    buffer_final.seek(0)
+
+    return buffer_final.getvalue()
 
 
 # ==================================================
@@ -491,18 +645,23 @@ else:
 
     if "resultats" not in st.session_state:
 
-        st.write("Compare ta watchlist et tes listes à ton historique pour repérer ce que tu as déjà vu.")
+        if "historique" in st.session_state:
+            st.write("Ton historique est déjà en mémoire pour cette session — cette analyse sera rapide.")
+        else:
+            st.write("Compare ta watchlist et tes listes à ton historique pour repérer ce que tu as déjà vu. La première analyse peut prendre un peu de temps (récupération de tout ton historique).")
 
         if st.button("🔍 Analyser"):
 
             barre = st.progress(0, text="Démarrage...")
 
-            historique = obtenir_historique(st.session_state["access_token"], barre)
-            resultats, stats_listes = analyser_tout(st.session_state["access_token"], historique, barre)
+            if "historique" not in st.session_state:
+                st.session_state["historique"] = obtenir_historique(st.session_state["access_token"], barre)
 
-            st.session_state["historique"] = historique
+            resultats, stats_listes, doublons = analyser_tout(st.session_state["access_token"], st.session_state["historique"], barre)
+
             st.session_state["resultats"] = resultats
             st.session_state["stats_listes"] = stats_listes
+            st.session_state["doublons"] = doublons
 
             barre.empty()
             st.rerun()
@@ -512,6 +671,10 @@ else:
         historique = st.session_state["historique"]
         resultats = st.session_state["resultats"]
         stats_listes = st.session_state["stats_listes"]
+        doublons = st.session_state["doublons"]
+
+        if st.session_state.get("message_suppression"):
+            st.success(st.session_state["message_suppression"])
 
         st.subheader("📊 Statistiques")
 
@@ -529,6 +692,14 @@ else:
         col5.metric("Contenus dans tes listes + watchlist", total_items)
         col6.metric("Déjà vus (tous confondus)", total_deja_vus)
         col7.metric("% potentiellement nettoyable", f"{pourcentage_global}%")
+
+        excel_bytes = generer_excel(pseudo, historique, resultats, stats_listes, doublons)
+        st.download_button(
+            "📥 Télécharger le rapport Excel complet",
+            data=excel_bytes,
+            file_name="trakt_smart_lists_rapport.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
         df_stats_listes = pd.DataFrame(stats_listes)
         df_stats_listes["% nettoyable"] = (
@@ -585,12 +756,10 @@ else:
                                 supprimer_selection(st.session_state["access_token"], items_a_supprimer)
 
                             st.session_state["confirmation_suppression"] = False
-                            del st.session_state["historique"]
-                            del st.session_state["resultats"]
-                            del st.session_state["stats_listes"]
-
-                            st.success(f"{nb_selectionnes} élément(s) supprimé(s) !")
-                            time.sleep(1.5)
+                            st.session_state["message_suppression"] = (
+                                f"{len(items_a_supprimer)} élément(s) supprimé(s) de tes listes Trakt. "
+                                f"Relance l'analyse (ci-dessous) pour voir les données à jour."
+                            )
                             st.rerun()
 
                     with col_non:
@@ -598,8 +767,23 @@ else:
                             st.session_state["confirmation_suppression"] = False
                             st.rerun()
 
-        if st.button("🔄 Relancer l'analyse"):
-            del st.session_state["historique"]
-            del st.session_state["resultats"]
-            del st.session_state["stats_listes"]
-            st.rerun()
+        st.divider()
+
+        col_relance_rapide, col_relance_totale = st.columns(2)
+
+        with col_relance_rapide:
+            if st.button("🔄 Relancer l'analyse des listes (rapide)"):
+                st.session_state.pop("message_suppression", None)
+                del st.session_state["resultats"]
+                del st.session_state["stats_listes"]
+                del st.session_state["doublons"]
+                st.rerun()
+
+        with col_relance_totale:
+            if st.button("🔃 Tout rafraîchir, historique inclus (plus long)"):
+                st.session_state.pop("message_suppression", None)
+                del st.session_state["historique"]
+                del st.session_state["resultats"]
+                del st.session_state["stats_listes"]
+                del st.session_state["doublons"]
+                st.rerun()
