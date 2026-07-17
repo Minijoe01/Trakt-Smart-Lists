@@ -21,193 +21,284 @@ st.set_page_config(page_title="Trakt Smart Lists", page_icon="🏎️", layout="
 # ==================================================
 
 def format_duree(heures):
-    """Convertit automatiquement des heures en semaines / jours / heures pour plus de lisibilité."""
-    if heures is None or heures != heures:  # Gère NaN
+    """Convertit heures en format lisible (semaines/jours/heures)"""
+    if pd.isna(heures) or heures is None:
         return "0h"
     heures = round(heures, 1)
-    total_minutes = round(heures * 60)
-    sem = total_minutes // (7 * 24 * 60)
-    jours = (total_minutes % (7 * 24 * 60)) // (24 * 60)
-    h = (total_minutes % (24 * 60)) // 60
+    total_min = round(heures * 60)
+    sem = total_min // (7 * 24 * 60)
+    jours = (total_min % (7 * 24 * 60)) // (24 * 60)
+    h = (total_min % (24 * 60)) // 60
     parts = []
     if sem > 0:
-        parts.append(f"{sem} semaine{'s' if sem > 1 else ''}")
+        parts.append(f"{sem} sem{'s' if sem>1 else ''}")
     if jours > 0:
-        parts.append(f"{jours} jour{'s' if jours > 1 else ''}")
+        parts.append(f"{jours}j")
     if h > 0 or not parts:
         parts.append(f"{h}h")
     return " ".join(parts)
 
-# Injection CSS thème Aston Martin vert profond
+# ==================================================
+# STYLE CINOPSYS x ASTON MARTIN
+# ==================================================
+
 st.markdown("""
 <style>
     :root {
         --am-green: #00A392;
         --am-green-dark: #007D70;
-        --am-green-darker: #04332F;
+        --am-green-darker: #052F2C;
         --am-lime: #CEDC00;
-        --am-bg-card: #08443F;
-        --am-border: #125A54;
-        --am-text-light: #F0FAF8;
+        --am-bg-card: rgba(8, 68, 63, 0.85);
+        --am-bg-card-hover: rgba(12, 88, 81, 0.9);
+        --am-border: rgba(18, 90, 84, 0.6);
+        --am-text: #F0FAF8;
         --am-text-muted: #9DC5BF;
     }
 
-    /* Fond global VERT ASTON MARTIN, pas de noir */
+    /* Fond UNIFORME vert Aston, pas de dégradé fort */
     .stApp {
-        background: linear-gradient(180deg, #04332F 0%, #032825 100%) !important;
+        background-color: var(--am-green-darker) !important;
     }
 
-    /* Cartes, métriques, alertes */
-    div[data-testid="stMetric"], div.stAlert, div[data-testid="stContainer"] {
+    /* EFFET VERRE / TRANSPARENCE comme Cinopsys */
+    div[data-testid="stMetric"],
+    div.stAlert,
+    div[data-testid="stContainer"],
+    div.stButton > button,
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div,
+    div[data-testid="stDataFrame"] {
         background-color: var(--am-bg-card) !important;
-        border-radius: 14px !important;
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
+        border-radius: 16px !important;
         border: 1px solid var(--am-border) !important;
-        padding: 18px !important;
-        box-shadow: 0 4px 14px rgba(0,0,0,0.2) !important;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2) !important;
     }
 
-    /* Barres de progression */
-    div[role="progressbar"] > div {
-        background-color: var(--am-lime) !important;
+    /* Metrics */
+    div[data-testid="stMetric"] {
+        padding: 20px !important;
     }
-
-    /* Cartes fantômes */
-    .ghost-card {
-        background-color: var(--am-bg-card);
-        border-radius: 12px;
-        padding: 18px 22px;
-        margin-bottom: 14px;
-        border-left: 4px solid var(--am-lime);
-        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    div[data-testid="stMetricValue"] {
+        color: var(--am-text) !important;
+        font-size: 1.8em !important;
+        font-weight: 800 !important;
     }
-    .ghost-card:hover {
-        border-left: 4px solid var(--am-green);
-        transform: translateX(3px);
-        box-shadow: 0 6px 16px rgba(0, 163, 146, 0.2);
-    }
-    .ghost-title {
-        font-size: 1.08em;
-        font-weight: 600;
-        color: var(--am-text-light);
-        margin-bottom: 6px;
-    }
-    .ghost-meta {
-        font-size: 0.9em;
-        color: var(--am-text-muted);
-        margin-bottom: 12px;
-    }
-    .progress-bar-container {
-        width: 100%;
-        height: 10px;
-        background-color: #063B37;
-        border-radius: 6px;
-        overflow: hidden;
-    }
-    .progress-bar-fill {
-        height: 100%;
-        border-radius: 6px;
-        transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .progress-low { background: linear-gradient(90deg, #ED2224 0%, #F8696B 100%); }
-    .progress-mid { background: linear-gradient(90deg, #CEDC00 0%, #E8F064 100%); }
-    .progress-high { background: linear-gradient(90deg, #00A392 0%, #00C7B3 100%); }
-
-    /* Boutons moderne */
-    .stButton > button {
-        border-radius: 10px;
-        border: 0;
+    div[data-testid="stMetricLabel"] p {
+        color: var(--am-text-muted) !important;
+        font-size: 0.9em !important;
         font-weight: 500;
-        padding: 0.6em 1.2em;
-        transition: all 0.2s ease;
-        border: 1px solid var(--am-border);
-        background-color: var(--am-bg-card);
-        color: var(--am-text-light);
+    }
+    div[data-testid="stMetricDelta"] {
+        font-size: 0.85em;
+    }
+
+    /* === UNIFORMISATION DES MESSAGES === */
+    /* Succès - vert Aston */
+    div.stSuccess {
+        background-color: rgba(0, 163, 146, 0.15) !important;
+        border-left: 4px solid var(--am-green) !important;
+        border: 1px solid rgba(0,163,146,0.3) !important;
+        color: var(--am-text) !important;
+    }
+    div.stSuccess svg {
+        fill: var(--am-green) !important;
+    }
+    /* Info - même couleur que les cartes, pas de bleu */
+    div.stInfo {
+        background-color: rgba(8, 68, 63, 0.85) !important;
+        border-left: 4px solid var(--am-green) !important;
+        border: 1px solid var(--am-border) !important;
+        color: var(--am-text) !important;
+    }
+    div.stInfo svg {
+        fill: var(--am-green) !important;
+    }
+    /* Warning - jaune Aston */
+    div.stWarning {
+        background-color: rgba(206, 220, 0, 0.1) !important;
+        border-left: 4px solid var(--am-lime) !important;
+        border: 1px solid rgba(206,220,0,0.3) !important;
+        color: var(--am-text) !important;
+    }
+    div.stWarning svg {
+        fill: var(--am-lime) !important;
+    }
+    /* Erreur - rouge seulement pour erreurs/confirmations suppression */
+    div.stError {
+        background-color: rgba(237,34,36,0.1) !important;
+        border-left: 4px solid #ED2224 !important;
+        border: 1px solid rgba(237,34,36,0.3) !important;
+    }
+
+    /* Boutons style Cinopsys */
+    .stButton > button {
+        font-weight: 600;
+        padding: 0.7em 1.3em;
+        color: var(--am-text) !important;
+        transition: all 0.25s ease;
     }
     .stButton > button:hover {
+        background-color: var(--am-bg-card-hover) !important;
         transform: translateY(-2px);
-        box-shadow: 0 6px 16px rgba(0, 163, 146, 0.3);
-        border-color: var(--am-green);
-        background-color: var(--am-green-dark);
+        box-shadow: 0 8px 24px rgba(0, 163, 146, 0.25);
+        border-color: var(--am-green) !important;
     }
     .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, var(--am-green) 0%, var(--am-green-dark) 100%);
-        border: 0;
-        color: white;
+        background: linear-gradient(135deg, var(--am-green) 0%, var(--am-green-dark) 100%) !important;
+        border: none !important;
+        font-weight: 700;
     }
     .stButton > button[kind="primary"]:hover {
-        box-shadow: 0 6px 20px rgba(0, 163, 146, 0.4);
+        box-shadow: 0 8px 28px rgba(0, 163, 146, 0.4);
+    }
+
+    /* Download bouton */
+    div[data-testid="stDownloadButton"] > button {
+        background-color: var(--am-bg-card) !important;
+        backdrop-filter: blur(12px);
+        border-radius: 16px !important;
+        border: 1px solid var(--am-border) !important;
+        color: var(--am-text) !important;
+        font-weight: 600;
+        width: 100%;
+        padding: 0.7em 1.3em;
+    }
+    div[data-testid="stDownloadButton"] > button:hover {
+        background-color: var(--am-bg-card-hover) !important;
+        border-color: var(--am-green) !important;
     }
 
     /* Sidebar */
     section[data-testid="stSidebar"] {
-        background-color: #032825 !important;
+        background-color: rgba(3, 25, 23, 0.95) !important;
+        backdrop-filter: blur(20px) !important;
         border-right: 1px solid var(--am-border);
     }
 
-    /* Menu titre */
+    /* MENU LATERAL STYLE CINOPSYS : élément sélectionné en GRAS avec fond vert */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label {
+        padding: 12px 16px !important;
+        border-radius: 12px;
+        gap: 12px !important;
+        transition: all 0.2s ease;
+        color: var(--am-text-muted) !important;
+        font-weight: 500;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label:hover {
+        background-color: rgba(0, 163, 146, 0.1) !important;
+        color: var(--am-text) !important;
+    }
+    /* Elément sélectionné */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label:has(input:checked) {
+        background: linear-gradient(135deg, rgba(0,163,146,0.25) 0%, rgba(0,125,112,0.2) 100%) !important;
+        color: var(--am-text) !important;
+        font-weight: 700 !important;
+        border: 1px solid rgba(0,163,146,0.4);
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label:has(input:checked) span {
+        color: var(--am-lime) !important;
+    }
+
     .section-menu-title {
-        font-size: 0.78em;
-        font-weight: 700;
+        font-size: 0.75em;
+        font-weight: 800;
         color: var(--am-lime);
         text-transform: uppercase;
-        letter-spacing: 1.2px;
-        margin: 18px 0 10px 0;
+        letter-spacing: 1.5px;
+        margin: 20px 0 12px 0;
     }
 
-    /* Dataframes */
-    div[data-testid="stDataFrame"] {
-        border-radius: 12px;
-        overflow: hidden;
-        border: 1px solid var(--am-border);
+    /* Checkboxes */
+    input[type="checkbox"]:checked {
+        accent-color: var(--am-green);
     }
 
+    /* Dividers */
     hr {
         border-color: var(--am-border) !important;
     }
 
     /* Textes */
     p, li, label {
-        color: var(--am-text-light) !important;
+        color: var(--am-text) !important;
     }
     .stCaption {
         color: var(--am-text-muted) !important;
     }
 
-    /* Focus */
-    *:focus {
-        outline: 2px solid var(--am-green) !important;
-        outline-offset: 2px;
+    /* Dataframes */
+    div[data-testid="stDataFrame"] {
+        overflow: hidden;
     }
 
-    /* Metrics */
-    div[data-testid="stMetricValue"] {
-        color: var(--am-text-light) !important;
-        font-size: 1.7em !important;
+    /* Bouton menu hamburger */
+    button[kind="header"] {
+        background-color: var(--am-bg-card) !important;
+        backdrop-filter: blur(12px);
+        border-radius: 12px !important;
+        border: 1px solid var(--am-border) !important;
+    }
+
+    /* Barres de progression */
+    div[role="progressbar"] > div {
+        background: linear-gradient(90deg, var(--am-green) 0%, var(--am-lime) 100%) !important;
+    }
+
+    /* Selectbox */
+    div[data-baseweb="select"] {
+        margin-bottom: 12px;
+    }
+
+    /* Cartes fantômes */
+    .ghost-card {
+        background-color: var(--am-bg-card);
+        backdrop-filter: blur(12px);
+        border-radius: 16px;
+        padding: 20px 24px;
+        margin-bottom: 14px;
+        border-left: 4px solid var(--am-lime);
+        transition: all 0.25s ease;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    .ghost-card:hover {
+        border-left: 4px solid var(--am-green);
+        transform: translateX(4px);
+        background-color: var(--am-bg-card-hover);
+        box-shadow: 0 8px 24px rgba(0, 163, 146, 0.2);
+    }
+    .ghost-title {
+        font-size: 1.1em;
         font-weight: 700;
+        color: var(--am-text);
+        margin-bottom: 6px;
     }
-    div[data-testid="stMetricLabel"] p {
-        color: var(--am-text-muted) !important;
-        font-size: 0.9em !important;
+    .ghost-meta {
+        font-size: 0.9em;
+        color: var(--am-text-muted);
+        margin-bottom: 14px;
     }
-    div[data-testid="stMetricDelta"] {
-        font-size: 0.85em;
-    }
-
-    /* Selectbox, inputs */
-    div[data-baseweb="select"] > div {
-        background-color: var(--am-bg-card) !important;
-        border-color: var(--am-border) !important;
-    }
-    div[data-baseweb="input"] > div {
-        background-color: var(--am-bg-card) !important;
-        border-color: var(--am-border) !important;
-    }
-
-    div[data-testid="stSidebarCollapsedControl"] {
-        background-color: var(--am-bg-card) !important;
+    .progress-bar-container {
+        width: 100%;
+        height: 12px;
+        background-color: rgba(6, 59, 55, 0.8);
         border-radius: 8px;
-        border: 1px solid var(--am-border);
+        overflow: hidden;
+    }
+    .progress-bar-fill {
+        height: 100%;
+        border-radius: 8px;
+        transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .progress-low { background: linear-gradient(90deg, #ED2224 0%, #F8696B 100%); }
+    .progress-mid { background: linear-gradient(90deg, var(--am-lime) 0%, #E8F064 100%); }
+    .progress-high { background: linear-gradient(90deg, var(--am-green) 0%, #00C7B3 100%); }
+
+    /* Sliders */
+    div[data-testid="stSlider"] > div > div > div {
+        background-color: var(--am-green) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -215,7 +306,7 @@ st.markdown("""
 cookies = CookieController()
 
 # ==================================================
-# CONFIGURATION
+# CONFIGURATION API
 # ==================================================
 
 CLIENT_ID = st.secrets["TRAKT_CLIENT_ID"]
@@ -226,15 +317,14 @@ DEVICE_TOKEN_URL = "https://api.trakt.tv/oauth/device/token"
 REFRESH_TOKEN_URL = "https://api.trakt.tv/oauth/token"
 
 def formater_date(date_str, user_tz):
-    """Formate une date Trakt (UTC) dans le fuseau horaire de l'utilisateur."""
     if not date_str:
         return ""
     try:
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         dt_local = dt.astimezone(user_tz)
         offset = dt_local.strftime("%z")
-        offset_formate = f"{offset[:3]}:{offset[3:]}"
-        return dt_local.strftime("%Y-%m-%d %H:%M:%S") + f" ({offset_formate})"
+        offset_f = f"{offset[:3]}:{offset[3:]}"
+        return dt_local.strftime("%Y-%m-%d %H:%M:%S") + f" ({offset_f})"
     except Exception:
         return date_str
 
@@ -243,851 +333,824 @@ def formater_date(date_str, user_tz):
 # ==================================================
 
 def demarrer_connexion():
-    response = requests.post(DEVICE_CODE_URL, json={"client_id": CLIENT_ID})
-    response.raise_for_status()
-    return response.json()
+    r = requests.post(DEVICE_CODE_URL, json={"client_id": CLIENT_ID})
+    r.raise_for_status()
+    return r.json()
 
-def verifier_connexion(device_code):
-    payload = {"code": device_code, "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET}
-    response = requests.post(DEVICE_TOKEN_URL, json=payload)
-    if response.status_code == 200:
-        return response.json()
-    erreurs = {404: "Code invalide.", 409: "Code déjà utilisé.", 410: "Code expiré.", 418: "Connexion refusée."}
-    if response.status_code in erreurs:
-        raise Exception(erreurs[response.status_code])
+def verifier_connexion(dc):
+    r = requests.post(DEVICE_TOKEN_URL, json={"code": dc, "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET})
+    if r.status_code == 200:
+        return r.json()
     return None
 
-def rafraichir_token(refresh_token):
-    payload = {"refresh_token": refresh_token, "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, "redirect_uri": "urn:ietf:wg:oauth:2.0:oob", "grant_type": "refresh_token"}
-    response = requests.post(REFRESH_TOKEN_URL, json=payload)
-    return response.json() if response.status_code == 200 else None
+def rafraichir_token(rt):
+    r = requests.post(REFRESH_TOKEN_URL, json={"refresh_token": rt, "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, "redirect_uri": "urn:ietf:wg:oauth:2.0:oob", "grant_type": "refresh_token"})
+    return r.json() if r.status_code == 200 else None
 
 def sauvegarder_connexion(tokens):
     st.session_state["access_token"] = tokens["access_token"]
     st.session_state["refresh_token"] = tokens["refresh_token"]
     cookies.set("trakt_refresh_token", tokens["refresh_token"])
-    time.sleep(0.4)
+    time.sleep(0.3)
 
 def oublier_connexion():
     cookies.remove("trakt_refresh_token")
-    time.sleep(0.4)
+    time.sleep(0.3)
     st.session_state.clear()
 
-def entetes_trakt(access_token):
-    return {"Content-Type": "application/json", "trakt-api-version": "2", "trakt-api-key": CLIENT_ID, "Authorization": f"Bearer {access_token}"}
+def entetes(at):
+    return {"Content-Type": "application/json", "trakt-api-version": "2", "trakt-api-key": CLIENT_ID, "Authorization": f"Bearer {at}"}
 
-def obtenir_infos_utilisateur(access_token):
-    response = requests.get("https://api.trakt.tv/users/settings", headers=entetes_trakt(access_token))
-    response.raise_for_status()
-    data = response.json()
-    tz_str = data["user"].get("timezone", "Europe/Paris")
+def obtenir_infos(at):
+    r = requests.get("https://api.trakt.tv/users/settings", headers=entetes(at))
+    r.raise_for_status()
+    d = r.json()
+    tz = d["user"].get("timezone", "Europe/Paris")
     try:
-        user_tz = pytz.timezone(tz_str)
+        utz = pytz.timezone(tz)
     except Exception:
-        user_tz = pytz.timezone("Europe/Paris")
-    return {"pseudo": data["user"]["username"], "timezone": user_tz, "tz_name": tz_str, "joined_at": data["user"].get("joined_at")}
+        utz = pytz.timezone("Europe/Paris")
+    return {"pseudo": d["user"]["username"], "tz": utz, "tz_name": tz}
 
-def generer_qr_code(url):
-    image = qrcode.make(url)
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
+def qrcode_img(url):
+    img = qrcode.make(url)
+    b = io.BytesIO()
+    img.save(b, format="PNG")
+    return b.getvalue()
 
-def recuperer_historique(access_token, barre=None):
-    headers = entetes_trakt(access_token)
-    films = {}
-    series = {}
-    films_details = []
-    episodes_details = []
-    ratings = {}
-    nb_visionnages_films = 0
-    nb_episodes = 0
-
-    premiere_page = requests.get("https://api.trakt.tv/users/me/history", headers=headers, params={"page": 1, "limit": 100, "extended": "full"})
-    premiere_page.raise_for_status()
-    total_pages = int(premiere_page.headers.get("X-Pagination-Page-Count", 1))
-
-    for page in range(1, total_pages + 1):
+def recuperer_historique(at, barre=None):
+    h = entetes(at)
+    films, series, films_det, ep_det = {}, {}, [], []
+    nf, ne = 0, 0
+    rp = requests.get("https://api.trakt.tv/users/me/history", headers=h, params={"page":1,"limit":100,"extended":"full"})
+    rp.raise_for_status()
+    tp = int(rp.headers.get("X-Pagination-Page-Count", 1))
+    for p in range(1, tp+1):
         if barre:
-            barre.progress(page / total_pages * 0.6, text=f"Récupération historique : page {page}/{total_pages}")
-        reponse = requests.get("https://api.trakt.tv/users/me/history", headers=headers, params={"page": page, "limit": 100, "extended": "full"})
-        reponse.raise_for_status()
-        for item in reponse.json():
-            if item["type"] == "movie":
-                nb_visionnages_films += 1
-                film = item["movie"]
-                identifiant = film["ids"]["trakt"]
-                note = item.get("rated_at")
-                rating_value = item.get("rating")
-                if rating_value:
-                    ratings[("movie", identifiant)] = rating_value
-                films_details.append({
-                    "titre": film["title"], "annee": film["year"],
-                    "genre": ", ".join(film.get("genres", [])) if film.get("genres") else "Inconnu",
-                    "duree": film.get("runtime", 0) or 0, "note": rating_value or film.get("rating", 0) or 0,
-                    "date_visionnage": item["watched_at"], "id": identifiant
-                })
-                if identifiant not in films:
-                    films[identifiant] = {"titre": film["title"], "annee": film["year"], "vues": 1, "dernier_visionnage": item["watched_at"]}
+            barre.progress(p/tp*0.6, text=f"Historique : page {p}/{tp}")
+        r = requests.get("https://api.trakt.tv/users/me/history", headers=h, params={"page":p,"limit":100,"extended":"full"})
+        r.raise_for_status()
+        for it in r.json():
+            if it["type"] == "movie":
+                nf += 1
+                m = it["movie"]
+                tid = m["ids"]["trakt"]
+                films_det.append({"titre":m["title"],"annee":m["year"],"genre":", ".join(m.get("genres",[])) if m.get("genres") else "Inconnu","duree":m.get("runtime",0) or 0,"note":m.get("rating",0) or 0,"date":it["watched_at"],"id":tid})
+                if tid not in films:
+                    films[tid] = {"titre":m["title"],"annee":m["year"],"vues":1,"dernier":it["watched_at"]}
                 else:
-                    films[identifiant]["vues"] += 1
-            elif item["type"] == "episode":
-                nb_episodes += 1
-                serie = item["show"]
-                episode = item["episode"]
-                identifiant = serie["ids"]["trakt"]
-                rating_value = item.get("rating")
-                if rating_value:
-                    ratings[("episode", episode["ids"]["trakt"])] = rating_value
-                episodes_details.append({
-                    "serie": serie["title"], "titre_episode": episode["title"],
-                    "saison": episode["season"], "episode": episode["number"], "annee": serie["year"],
-                    "genre": ", ".join(serie.get("genres", [])) if serie.get("genres") else "Inconnu",
-                    "duree": (episode.get("runtime", 0) or serie.get("runtime", 0) or 40),
-                    "note": rating_value or serie.get("rating", 0) or 0,
-                    "date_visionnage": item["watched_at"], "id": identifiant
-                })
-                if identifiant not in series:
-                    series[identifiant] = {"titre": serie["title"], "annee": serie["year"], "vues": 1, "dernier_visionnage": item["watched_at"]}
+                    films[tid]["vues"] += 1
+            elif it["type"] == "episode":
+                ne += 1
+                s = it["show"]
+                ep = it["episode"]
+                sid = s["ids"]["trakt"]
+                ep_det.append({"serie":s["title"],"titre":ep["title"],"saison":ep["season"],"episode":ep["number"],"annee":s["year"],"genre":", ".join(s.get("genres",[])) if s.get("genres") else "Inconnu","duree":ep.get("runtime",0) or s.get("runtime",40) or 40,"note":s.get("rating",0) or 0,"date":it["watched_at"],"id":sid})
+                if sid not in series:
+                    series[sid] = {"titre":s["title"],"annee":s["year"],"vues":1,"dernier":it["watched_at"]}
                 else:
-                    series[identifiant]["vues"] += 1
-    return {
-        "films": films, "series": series, "films_details": films_details, "episodes_details": episodes_details,
-        "nb_films": len(films), "nb_series": len(series),
-        "nb_visionnages_films": nb_visionnages_films, "nb_episodes": nb_episodes,
-        "ratings": ratings
-    }
+                    series[sid]["vues"] +=1
+    return {"films":films,"series":series,"films_det":films_det,"ep_det":ep_det,"nb_films":len(films),"nb_series":len(series),"nb_vf":nf,"nb_ep":ne}
 
-def recuperer_listes(access_token):
-    reponse = requests.get("https://api.trakt.tv/users/me/lists", headers=entetes_trakt(access_token))
-    reponse.raise_for_status()
-    return reponse.json()
+def recuperer_listes(at):
+    r = requests.get("https://api.trakt.tv/users/me/lists", headers=entetes(at))
+    r.raise_for_status()
+    return r.json()
 
-def recuperer_contenu_liste(access_token, list_id):
-    headers = entetes_trakt(access_token)
-    items_total = []
-    page = 1
+def recuperer_contenu_liste(at, lid):
+    h = entetes(at)
+    items, p = [], 1
     while True:
-        reponse = requests.get(f"https://api.trakt.tv/users/me/lists/{list_id}/items", headers=headers, params={"page": page, "limit": 100})
-        reponse.raise_for_status()
-        items = reponse.json()
-        if not items:
-            break
-        items_total.extend(items)
-        page += 1
-    return items_total
+        r = requests.get(f"https://api.trakt.tv/users/me/lists/{lid}/items", headers=h, params={"page":p,"limit":100})
+        r.raise_for_status()
+        d = r.json()
+        if not d: break
+        items.extend(d)
+        p +=1
+    return items
 
-def recuperer_watchlist(access_token):
-    headers = entetes_trakt(access_token)
-    items_total = []
-    page = 1
+def recuperer_watchlist(at):
+    h = entetes(at)
+    items, p = [],1
     while True:
-        reponse = requests.get("https://api.trakt.tv/users/me/watchlist", headers=headers, params={"page": page, "limit": 100})
-        reponse.raise_for_status()
-        items = reponse.json()
-        if not items:
-            break
-        items_total.extend(items)
-        page += 1
-    return items_total
+        r = requests.get("https://api.trakt.tv/users/me/watchlist", headers=h, params={"page":p,"limit":100})
+        r.raise_for_status()
+        d = r.json()
+        if not d: break
+        items.extend(d)
+        p +=1
+    return items
 
-def compter_types(items):
-    return sum(1 for i in items if i["type"] == "movie"), sum(1 for i in items if i["type"] == "show")
+def ct(items):
+    return sum(1 for i in items if i["type"]=="movie"), sum(1 for i in items if i["type"]=="show")
 
-def comparer_items_avec_historique(items, historique):
-    resultats = []
-    for item in items:
-        if item["type"] == "movie":
-            film = item["movie"]
-            identifiant = film["ids"]["trakt"]
-            if identifiant in historique["films"]:
-                vu = historique["films"][identifiant]
-                resultats.append({"type": "Film", "titre": film["title"], "annee": film["year"], "vues": vu["vues"], "dernier_visionnage": vu["dernier_visionnage"], "trakt_id": identifiant, "tmdb_id": film["ids"].get("tmdb")})
-        elif item["type"] == "show":
-            serie = item["show"]
-            identifiant = serie["ids"]["trakt"]
-            if identifiant in historique["series"]:
-                vu = historique["series"][identifiant]
-                resultats.append({"type": "Série", "titre": serie["title"], "annee": serie["year"], "vues": vu["vues"], "dernier_visionnage": vu["dernier_visionnage"], "trakt_id": identifiant, "tmdb_id": serie["ids"].get("tmdb")})
-    return resultats
+def comparer(items, histo):
+    res = []
+    for it in items:
+        if it["type"] == "movie":
+            m = it["movie"]
+            tid = m["ids"]["trakt"]
+            if tid in histo["films"]:
+                v = histo["films"][tid]
+                res.append({"type":"Film","titre":m["title"],"annee":m["year"],"vues":v["vues"],"dernier":v["dernier"],"tid":tid,"tmdb":m["ids"].get("tmdb")})
+        elif it["type"] == "show":
+            s = it["show"]
+            sid = s["ids"]["trakt"]
+            if sid in histo["series"]:
+                v = histo["series"][sid]
+                res.append({"type":"Série","titre":s["title"],"annee":s["year"],"vues":v["vues"],"dernier":v["dernier"],"tid":sid,"tmdb":s["ids"].get("tmdb")})
+    return res
 
-def analyser_toutes_les_donnees(access_token, historique, barre=None):
-    resultats = []
-    stats_listes = []
-    apparitions = {}
-
-    def enregistrer_apparition(item, nom_liste, liste_id):
-        if item["type"] == "movie":
-            media, type_affiche = item["movie"], "Film"
-        elif item["type"] == "show":
-            media, type_affiche = item["show"], "Série"
+def analyser(at, histo, barre=None):
+    res, stats, app = [], [], {}
+    def aj(it, nom, lid):
+        if it["type"] == "movie":
+            med, t = it["movie"], "Film"
+        elif it["type"] == "show":
+            med, t = it["show"], "Série"
         else:
             return
-        trakt_id = media["ids"]["trakt"]
-        cle = (type_affiche, trakt_id)
-        if cle not in apparitions:
-            apparitions[cle] = {"titre": media["title"], "annee": media["year"], "type": type_affiche, "trakt_id": trakt_id, "tmdb_id": media["ids"].get("tmdb"), "vu_dans": []}
-        apparitions[cle]["vu_dans"].append({"nom_liste": nom_liste, "liste_id": liste_id})
-
+        tid = med["ids"]["trakt"]
+        cle = (t, tid)
+        if cle not in app:
+            app[cle] = {"titre":med["title"],"annee":med["year"],"type":t,"tid":tid,"tmdb":med["ids"].get("tmdb"),"dans":[]}
+        app[cle]["dans"].append({"nom":nom,"lid":lid})
     if barre:
-        barre.progress(0.6, text="Analyse de la liste de suivi...")
-    watchlist = recuperer_watchlist(access_token)
-    for item in watchlist:
-        enregistrer_apparition(item, "Liste de suivi", "watchlist")
-    matches = comparer_items_avec_historique(watchlist, historique)
-    for m in matches:
-        m["liste"] = "Liste de suivi"
-        m["liste_id"] = "watchlist"
-    resultats.extend(matches)
-    nb_films, nb_series = compter_types(watchlist)
-    stats_listes.append({"nom": "Liste de suivi (officielle)", "nb_films": nb_films, "nb_series": nb_series, "total": len(watchlist), "deja_vus": len(matches)})
-
-    listes = recuperer_listes(access_token)
-    for i, liste in enumerate(listes):
+        barre.progress(0.6, text="Analyse liste de suivi...")
+    wl = recuperer_watchlist(at)
+    for it in wl: aj(it, "Liste de suivi", "watchlist")
+    m = comparer(wl, histo)
+    for x in m:
+        x["liste"] = "Liste de suivi"
+        x["lid"] = "watchlist"
+    res.extend(m)
+    nf, ns = ct(wl)
+    stats.append({"nom":"Liste de suivi","nf":nf,"ns":ns,"total":len(wl),"vus":len(m)})
+    listes = recuperer_listes(at)
+    for i, l in enumerate(listes):
         if barre:
-            barre.progress(0.6 + (i+1)/max(len(listes),1)*0.3, text=f"Analyse : {liste['name']}")
-        items = recuperer_contenu_liste(access_token, liste["ids"]["trakt"])
-        for item in items:
-            enregistrer_apparition(item, liste["name"], liste["ids"]["trakt"])
-        matches = comparer_items_avec_historique(items, historique)
-        for m in matches:
-            m["liste"] = liste["name"]
-            m["liste_id"] = liste["ids"]["trakt"]
-        resultats.extend(matches)
-        nb_films, nb_series = compter_types(items)
-        stats_listes.append({"nom": liste["name"], "nb_films": nb_films, "nb_series": nb_series, "total": len(items), "deja_vus": len(matches)})
+            barre.progress(0.6 + (i+1)/max(len(listes),1)*0.3, text=f"Analyse : {l['name']}")
+        items = recuperer_contenu_liste(at, l["ids"]["trakt"])
+        for it in items: aj(it, l["name"], l["ids"]["trakt"])
+        m = comparer(items, histo)
+        for x in m:
+            x["liste"] = l["name"]
+            x["lid"] = l["ids"]["trakt"]
+        res.extend(m)
+        nf, ns = ct(items)
+        stats.append({"nom":l["name"],"nf":nf,"ns":ns,"total":len(items),"vus":len(m)})
+    doublons, doublons_det = [], []
+    for info in app.values():
+        if len(info["dans"])>=2:
+            doublons.append({"type":info["type"],"titre":info["titre"],"annee":info["annee"],"tmdb":info["tmdb"],"nb_listes":len(info["dans"]),"listes":", ".join(v["nom"] for v in info["dans"])})
+            for v in info["dans"]:
+                doublons_det.append({"type":info["type"],"titre":info["titre"],"annee":info["annee"],"tid":info["tid"],"liste":v["nom"],"lid":v["lid"]})
+    return res, stats, doublons, doublons_det
 
-    doublons, doublons_detail = [], []
-    for info in apparitions.values():
-        if len(info["vu_dans"]) >= 2:
-            doublons.append({"type": info["type"], "titre": info["titre"], "annee": info["annee"], "tmdb_id": info["tmdb_id"], "nombre_listes": len(info["vu_dans"]), "listes": ", ".join(v["nom_liste"] for v in info["vu_dans"])})
-            for v in info["vu_dans"]:
-                doublons_detail.append({"type": info["type"], "titre": info["titre"], "annee": info["annee"], "trakt_id": info["trakt_id"], "liste": v["nom_liste"], "liste_id": v["liste_id"]})
-    return resultats, stats_listes, doublons, doublons_detail
-
-def recuperer_progressions(access_token, barre=None):
+def recuperer_playback(at, barre=None):
     if barre:
-        barre.progress(0.95, text="Recherche des progressions fantômes...")
-    reponse = requests.get("https://api.trakt.tv/sync/playback", headers=entetes_trakt(access_token))
-    reponse.raise_for_status()
-    resultats = []
-    for item in reponse.json():
-        if item["type"] == "movie" and item.get("movie"):
-            media, titre, annee = item["movie"], item["movie"]["title"], item["movie"].get("year")
-        elif item["type"] == "episode" and item.get("show") and item.get("episode"):
-            ep = item["episode"]
-            titre = f"{item['show']['title']} — S{ep['season']:02d}E{ep['number']:02d}" if ep.get("season") and ep.get("number") else item['show']['title']
-            annee = item["show"].get("year")
+        barre.progress(0.95, text="Recherche des fantômes...")
+    r = requests.get("https://api.trakt.tv/sync/playback", headers=entetes(at))
+    r.raise_for_status()
+    res = []
+    for it in r.json():
+        if it["type"] == "movie" and it.get("movie"):
+            t, a = it["movie"]["title"], it["movie"].get("year")
+            ty = "Film"
+        elif it["type"] == "episode" and it.get("show") and it.get("episode"):
+            ep = it["episode"]
+            t = f"{it['show']['title']} — S{ep['season']:02d}E{ep['number']:02d}" if ep.get("season") and ep.get("number") else it["show"]["title"]
+            a = it["show"].get("year")
+            ty = "Épisode"
         else:
             continue
-        resultats.append({"type": "Film" if item["type"] == "movie" else "Épisode", "titre": titre, "annee": annee, "progression": round(item.get("progress",0)), "dernier_visionnage": item["paused_at"], "playback_id": item["id"]})
-    resultats.sort(key=lambda x: x["dernier_visionnage"])
-    return resultats
+        res.append({"type":ty,"titre":t,"annee":a,"prog":round(it.get("progress",0)),"dernier":it["paused_at"],"pid":it["id"]})
+    res.sort(key=lambda x: x["dernier"])
+    return res
 
-def lancer_analyse_complete(raffraichir_historique=False):
+def lancer_analyse(rafraichir_histo=False):
     barre = st.progress(0, text="Démarrage...")
-    if raffraichir_historique or "historique" not in st.session_state:
+    if rafraichir_histo or "historique" not in st.session_state:
         st.session_state["historique"] = recuperer_historique(st.session_state["access_token"], barre)
-    resultats, stats_listes, doublons, doublons_detail = analyser_toutes_les_donnees(st.session_state["access_token"], st.session_state["historique"], barre)
-    playback = recuperer_progressions(st.session_state["access_token"], barre)
-    st.session_state["resultats"] = resultats
-    st.session_state["stats_listes"] = stats_listes
-    st.session_state["doublons"] = doublons
-    st.session_state["doublons_detail"] = doublons_detail
-    st.session_state["playback"] = playback
+    res, stats, doub, doub_det = analyser(st.session_state["access_token"], st.session_state["historique"], barre)
+    pb = recuperer_playback(st.session_state["access_token"], barre)
+    st.session_state["res"] = res
+    st.session_state["stats"] = stats
+    st.session_state["doub"] = doub
+    st.session_state["doub_det"] = doub_det
+    st.session_state["pb"] = pb
     barre.empty()
+    st.query_params["page"] = "🏠 Tableau de bord"
     st.rerun()
 
 # ==================================================
-# FONCTIONS SUPPRESSION
+# SUPPRESSION
 # ==================================================
 
-def supprimer_de_liste(access_token, liste_id, items_a_supprimer):
-    corps = {"movies": [], "shows": []}
-    for item in items_a_supprimer:
-        cible = corps["movies"] if item["type"] == "Film" else corps["shows"]
-        cible.append({"ids": {"trakt": item["trakt_id"]}})
-    url = "https://api.trakt.tv/sync/watchlist/remove" if liste_id == "watchlist" else f"https://api.trakt.tv/users/me/lists/{liste_id}/items/remove"
-    requests.post(url, headers=entetes_trakt(access_token), json=corps).raise_for_status()
+def sup_liste(at, lid, items):
+    corps = {"movies":[],"shows":[]}
+    for it in items:
+        c = corps["movies"] if it["type"]=="Film" else corps["shows"]
+        c.append({"ids":{"trakt":it["tid"]}})
+    url = "https://api.trakt.tv/sync/watchlist/remove" if lid == "watchlist" else f"https://api.trakt.tv/users/me/lists/{lid}/items/remove"
+    requests.post(url, headers=entetes(at), json=corps).raise_for_status()
 
-def supprimer_selection(access_token, items_selectionnes):
-    par_liste = {}
-    for item in items_selectionnes:
-        par_liste.setdefault(item["liste_id"], []).append(item)
-    for liste_id, items in par_liste.items():
-        supprimer_de_liste(access_token, liste_id, items)
-        time.sleep(0.8)
+def sup_selection(at, items):
+    pl = {}
+    for it in items:
+        pl.setdefault(it["lid"], []).append(it)
+    for lid, its in pl.items():
+        sup_liste(at, lid, its)
+        time.sleep(0.7)
 
-def supprimer_progressions(access_token, items_selectionnes):
-    for item in items_selectionnes:
-        requests.delete(f"https://api.trakt.tv/sync/playback/{item['playback_id']}", headers=entetes_trakt(access_token)).raise_for_status()
-        time.sleep(0.4)
+def sup_playback(at, items):
+    for it in items:
+        requests.delete(f"https://api.trakt.tv/sync/playback/{it['pid']}", headers=entetes(at)).raise_for_status()
+        time.sleep(0.3)
 
 # ==================================================
-# EXPORT EXCEL
+# EXCEL
 # ==================================================
 
-def ajuster_largeur_colonnes(ws):
-    for colonne in ws.columns:
-        longueur = 0
-        lettre = get_column_letter(colonne[0].column)
-        for cellule in colonne:
+def ajuster(ws):
+    for col in ws.columns:
+        l = 0
+        lettre = get_column_letter(col[0].column)
+        for c in col:
             try:
-                if len(str(cellule.value)) > longueur:
-                    longueur = len(str(cellule.value))
-            except Exception:
+                if len(str(c.value)) > l:
+                    l = len(str(c.value))
+            except:
                 pass
-        ws.column_dimensions[lettre].width = longueur + 4
+        ws.column_dimensions[lettre].width = l+4
 
-def mettre_en_forme_feuille(ws, couleur_entete="00665F"):
+def forme(ws, coul="007D70"):
     ws.freeze_panes = "A2"
     if ws.max_row > 1:
         ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
-        table = Table(displayName=f"Table_{ws.title.replace(' ', '_')}", ref=ref)
-        table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showFirstColumn=False, showLastColumn=False, showRowStripes=True, showColumnStripes=False)
-        ws.add_table(table)
-    for cellule in ws[1]:
-        cellule.font = Font(bold=True, color="FFFFFF")
-        cellule.fill = PatternFill(start_color=couleur_entete, end_color=couleur_entete, fill_type="solid")
-        cellule.alignment = Alignment(horizontal="center")
-    ajuster_largeur_colonnes(ws)
+        t = Table(displayName=f"Tab_{ws.title.replace(' ','_')}", ref=ref)
+        t.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showFirstColumn=False, showLastColumn=False, showRowStripes=True, showColumnStripes=False)
+        ws.add_table(t)
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill(start_color=coul, end_color=coul, fill_type="solid")
+        c.alignment = Alignment(horizontal="center")
+    ajuster(ws)
 
-def generer_rapport_excel(pseudo, historique, resultats, stats_listes, doublons, playback, user_tz):
-    total_heures = sum(m["duree"] for m in historique["films_details"]) / 60 + sum(e["duree"] for e in historique["episodes_details"]) /60
-    df_resume = pd.DataFrame([
-        ["Compte Trakt", pseudo], ["Fuseau horaire", user_tz.zone],
-        ["Films vus (uniques)", historique["nb_films"]], ["Séries vues (uniques)", historique["nb_series"]],
-        ["Épisodes vus", historique["nb_episodes"]], ["Temps total de visionnage", format_duree(total_heures)],
-        ["Listes personnalisées", len(stats_listes) -1], ["Contenus dans listes + suivi", sum(s["total"] for s in stats_listes)],
-        ["Contenus déjà vus", len(resultats)], ["Doublons", len(doublons)], ["Progressions fantômes", len(playback)]
+def generer_excel(pseudo, histo, res, stats, doub, pb, utz):
+    th = sum(m["duree"] for m in histo["films_det"])/60 + sum(e["duree"] for e in histo["ep_det"])/60
+    df_sum = pd.DataFrame([
+        ["Compte", pseudo], ["Fuseau", utz.zone],
+        ["Films vus", histo["nb_films"]], ["Séries vues", histo["nb_series"]],
+        ["Épisodes vus", histo["nb_ep"]], ["Temps total", format_duree(th)],
+        ["Listes", len(stats)-1], ["Contenus total", sum(s["total"] for s in stats)],
+        ["Déjà vus", len(res)], ["Doublons", len(doub)], ["Fantômes", len(pb)]
     ], columns=["Statistique", "Valeur"])
-    df_resultats = pd.DataFrame(resultats)
-    if not df_resultats.empty:
-        df_resultats = df_resultats[["liste", "type", "titre", "annee", "vues", "dernier_visionnage", "tmdb_id"]].copy()
-        df_resultats["dernier_visionnage"] = pd.to_datetime(df_resultats["dernier_visionnage"]).dt.tz_convert(user_tz).dt.strftime("%d/%m/%Y %H:%M")
-        df_resultats.columns = ["Liste", "Type", "Titre", "Année", "Vues", "Dernier visionnage", "ID TMDB"]
+    df_res = pd.DataFrame(res)
+    if not df_res.empty:
+        df_res = df_res[["liste","type","titre","annee","vues","dernier","tmdb"]].copy()
+        df_res["dernier"] = pd.to_datetime(df_res["dernier"]).dt.tz_convert(utz).dt.strftime("%d/%m/%Y %H:%M")
+        df_res.columns = ["Liste","Type","Titre","Année","Vues","Dernier","TMDB"]
     else:
-        df_resultats = pd.DataFrame(columns=["Liste", "Type", "Titre", "Année", "Vues", "Dernier visionnage", "ID TMDB"])
-    df_doublons = pd.DataFrame(doublons)
-    if not df_doublons.empty:
-        df_doublons = df_doublons[["type", "titre", "annee", "tmdb_id", "nombre_listes", "listes"]].copy()
-        df_doublons.columns = ["Type", "Titre", "Année", "ID TMDB", "Nombre de listes", "Présent dans"]
+        df_res = pd.DataFrame(columns=["Liste","Type","Titre","Année","Vues","Dernier","TMDB"])
+    df_d = pd.DataFrame(doub)
+    if not df_d.empty:
+        df_d = df_d[["type","titre","annee","tmdb","nb_listes","listes"]].copy()
+        df_d.columns = ["Type","Titre","Année","TMDB","Nb listes","Dans"]
     else:
-        df_doublons = pd.DataFrame(columns=["Type", "Titre", "Année", "ID TMDB", "Nombre de listes", "Présent dans"])
-    df_listes = pd.DataFrame(stats_listes)
-    df_listes["% nettoyage possible"] = (df_listes["deja_vus"] / df_listes["total"].replace(0,1) * 100).round(1)
-    df_listes = df_listes[["nom", "nb_films", "nb_series", "total", "deja_vus", "% nettoyage possible"]]
-    df_listes.columns = ["Liste", "Films", "Séries", "Nombre de contenus", "Déjà vus", "% nettoyage possible"]
-    df_fantomes = pd.DataFrame(playback)
-    if not df_fantomes.empty:
-        df_fantomes = df_fantomes[["type", "titre", "annee", "progression", "dernier_visionnage"]].copy()
-        df_fantomes["dernier_visionnage"] = pd.to_datetime(df_fantomes["dernier_visionnage"]).dt.tz_convert(user_tz).dt.strftime("%d/%m/%Y %H:%M")
-        df_fantomes.columns = ["Type", "Titre", "Année", "Progression (%)", "Dernier visionnage"]
+        df_d = pd.DataFrame(columns=["Type","Titre","Année","TMDB","Nb listes","Dans"])
+    df_sl = pd.DataFrame(stats)
+    df_sl["% nettoyage"] = (df_sl["vus"]/df_sl["total"].replace(0,1)*100).round(1)
+    df_sl = df_sl[["nom","nf","ns","total","vus","% nettoyage"]]
+    df_sl.columns = ["Liste","Films","Séries","Total","Déjà vus","% nettoyage"]
+    df_pb = pd.DataFrame(pb)
+    if not df_pb.empty:
+        df_pb = df_pb[["type","titre","annee","prog","dernier"]].copy()
+        df_pb["dernier"] = pd.to_datetime(df_pb["dernier"]).dt.tz_convert(utz).dt.strftime("%d/%m/%Y %H:%M")
+        df_pb.columns = ["Type","Titre","Année","Progression","Dernier"]
     else:
-        df_fantomes = pd.DataFrame(columns=["Type", "Titre", "Année", "Progression (%)", "Dernier visionnage"])
-
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_resume.to_excel(writer, sheet_name="Résumé", index=False)
-        df_resultats.to_excel(writer, sheet_name="À nettoyer", index=False)
-        df_doublons.to_excel(writer, sheet_name="Doublons", index=False)
-        df_fantomes.to_excel(writer, sheet_name="Progressions fantômes", index=False)
-        df_listes.to_excel(writer, sheet_name="Analyse par liste", index=False)
-    buffer.seek(0)
-    classeur = load_workbook(buffer)
-    for feuille in classeur:
-        mettre_en_forme_feuille(feuille)
-    # Color scale pour pourcentage
-    ws_listes = classeur["Analyse par liste"]
-    colonne_pct = None
-    for c in ws_listes[1]:
-        if c.value == "% nettoyage possible":
-            colonne_pct = c.column
-    if colonne_pct:
-        lettre = get_column_letter(colonne_pct)
-        ws_listes.conditional_formatting.add(f"{lettre}2:{lettre}{ws_listes.max_row}", ColorScaleRule(start_type="min", start_color="63BE7B", mid_type="percentile", mid_value=50, mid_color="FFEB84", end_type="max", end_color="F8696B"))
-    buffer_final = io.BytesIO()
-    classeur.save(buffer_final)
-    buffer_final.seek(0)
-    return buffer_final.getvalue()
+        df_pb = pd.DataFrame(columns=["Type","Titre","Année","Progression","Dernier"])
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as wr:
+        df_sum.to_excel(wr, sheet_name="Résumé", index=False)
+        df_res.to_excel(wr, sheet_name="À nettoyer", index=False)
+        df_d.to_excel(wr, sheet_name="Doublons", index=False)
+        df_pb.to_excel(wr, sheet_name="Fantômes", index=False)
+        df_sl.to_excel(wr, sheet_name="Listes", index=False)
+    buf.seek(0)
+    wb = load_workbook(buf)
+    for sh in wb: forme(sh)
+    ws = wb["Listes"]
+    cp = None
+    for c in ws[1]:
+        if c.value == "% nettoyage":
+            cp = c.column
+    if cp:
+        l = get_column_letter(cp)
+        ws.conditional_formatting.add(f"{l}2:{l}{ws.max_row}", ColorScaleRule(start_type="min", start_color="63BE7B", mid_type="percentile", mid_value=50, mid_color="FFEB84", end_type="max", end_color="F8696B"))
+    buf_f = io.BytesIO()
+    wb.save(buf_f)
+    buf_f.seek(0)
+    return buf_f.getvalue()
 
 # ==================================================
-# ENTÊTE COMMUN
+# ENTÊTE
 # ==================================================
 
-def afficher_entete():
-    col_logo, col_titre = st.columns([0.08, 0.92])
-    with col_logo:
-        try:
-            st.image("trakt-logo.svg", width=60)
-        except Exception:
-            pass
-    with col_titre:
+def entete():
+    cl, ct = st.columns([0.08, 0.92])
+    with cl:
+        try: st.image("trakt-logo.svg", width=60)
+        except: pass
+    with ct:
         st.title("Trakt Smart Lists")
-
     if "access_token" not in st.session_state:
         return None
-
-    if "infos_utilisateur" not in st.session_state:
-        st.session_state["infos_utilisateur"] = obtenir_infos_utilisateur(st.session_state["access_token"])
-    infos = st.session_state["infos_utilisateur"]
-    pseudo = infos["pseudo"]
-    user_tz = infos["timezone"]
-
-    colonne_info, colonne_deco = st.columns([4,1])
-    with colonne_info:
-        st.success(f"Connecté en tant que **{pseudo}** • Fuseau : `{infos['tz_name']}`", icon="👤")
-    with colonne_deco:
-        if st.button("🚪 Se déconnecter", use_container_width=True):
+    if "infos" not in st.session_state:
+        st.session_state["infos"] = obtenir_infos(st.session_state["access_token"])
+    infos = st.session_state["infos"]
+    pseudo, utz = infos["pseudo"], infos["tz"]
+    ci, cd = st.columns([4,1])
+    with ci:
+        st.info(f"👤 Connecté en tant que **{pseudo}** • 🕒 `{infos['tz_name']}`")
+    with cd:
+        if st.button("🚪 Déconnexion", use_container_width=True):
             oublier_connexion()
             st.rerun()
     st.divider()
-
-    # Boutons globaux sur TOUTES les pages
-    if "resultats" in st.session_state:
-        historique = st.session_state["historique"]
-        resultats = st.session_state["resultats"]
-        stats_listes = st.session_state["stats_listes"]
-        doublons = st.session_state["doublons"]
-        playback = st.session_state["playback"]
-        excel_bytes = generer_rapport_excel(pseudo, historique, resultats, stats_listes, doublons, playback, user_tz)
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("🔄 Analyse rapide", use_container_width=True, help="Garde l'historique"):
-                for cle in ["resultats", "stats_listes", "doublons", "doublons_detail", "playback"]:
-                    st.session_state.pop(cle, None)
-                lancer_analyse_complete(False)
-        with col2:
-            if st.button("🔃 Rafraîchir tout", use_container_width=True, help="Récupère tout l'historique à nouveau"):
-                for cle in ["historique", "resultats", "stats_listes", "doublons", "doublons_detail", "playback", "infos_utilisateur"]:
-                    st.session_state.pop(cle, None)
+    if "res" in st.session_state:
+        h = st.session_state["historique"]
+        res = st.session_state["res"]
+        stats = st.session_state["stats"]
+        doub = st.session_state["doub"]
+        pb = st.session_state["pb"]
+        xl = generer_excel(pseudo, h, res, stats, doub, pb, utz)
+        c1,c2,c3 = st.columns(3)
+        with c1:
+            if st.button("🔄 Analyse rapide", use_container_width=True):
+                for k in ["res","stats","doub","doub_det","pb"]:
+                    st.session_state.pop(k, None)
+                lancer_analyse(False)
+        with c2:
+            if st.button("🔃 Rafraîchir tout", use_container_width=True):
+                for k in ["historique","res","stats","doub","doub_det","pb","infos"]:
+                    st.session_state.pop(k, None)
                 st.rerun()
-        with col3:
-            st.download_button("📥 Rapport Excel", data=excel_bytes, file_name=f"trakt_{pseudo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with c3:
+            st.download_button("📥 Rapport Excel", data=xl, file_name=f"trakt_{pseudo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         st.divider()
-    return user_tz
+    return utz
 
-def afficher_bloc_lancement():
-    if "resultats" in st.session_state:
+def bloc_lancement():
+    if "res" in st.session_state:
         return False
     if "historique" in st.session_state:
-        st.info("ℹ️ Ton historique est déjà chargé — l'analyse sera rapide.")
-        texte = "🔄 Lancer l'analyse rapide"
+        st.info("ℹ️ Ton historique est déjà chargé.")
+        txt = "🔄 Lancer l'analyse rapide"
     else:
-        st.info("ℹ️ Lance l'analyse pour accéder à tous les outils.")
-        texte = "🔍 Lancer l'analyse complète"
-    if st.button(texte, type="primary", use_container_width=True):
-        lancer_analyse_complete()
+        st.info("ℹ️ Lance l'analyse pour commencer.")
+        txt = "🔍 Lancer l'analyse complète"
+    if st.button(txt, type="primary", use_container_width=True):
+        lancer_analyse()
     return True
 
-def navigation():
-    """Affiche la navigation et gère la redirection des boutons, en fermant bien le menu sur mobile."""
+def naviguer():
     PAGES = [
         "🏠 Tableau de bord",
         "👻 Progression Fantôme",
         "🧹 Nettoyage des listes",
         "🔍 Recherche de doublons",
-        "📊 Statistiques détaillées",
+        "📊 Statistiques",
         "🎬 Rendez-vous annuel",
-        "📤 Sauvegarde / Restauration",
+        "📤 Sauvegarde",
         "🏆 Succès",
     ]
+    page_defaut = PAGES[0]
+    if "page" in st.query_params:
+        pq = st.query_params["page"]
+        if pq in PAGES:
+            page_defaut = pq
     with st.sidebar:
         st.markdown('<p class="section-menu-title">Menu</p>', unsafe_allow_html=True)
         page = st.radio(
-            "Sélectionne une page",
+            "Navigation",
             PAGES,
-            index=PAGES.index(st.session_state.get("page_active", PAGES[0])),
+            index=PAGES.index(page_defaut),
             label_visibility="collapsed",
-            key="navigation_radio",
+            key="nav"
         )
-        st.session_state["page_active"] = page
+    st.query_params["page"] = page
     return page
+
+def aller_a(page):
+    """Redirige de façon fiable vers une page"""
+    st.query_params["page"] = page
+    st.rerun()
 
 # ==================================================
 # PAGES
 # ==================================================
 
 def page_connexion():
-    if "device_code" not in st.session_state:
+    if "dc" not in st.session_state:
         st.write("Connecte ton compte Trakt pour commencer.")
-        if st.button("🚀 Se connecter à Trakt", type="primary"):
+        if st.button("🚀 Se connecter", type="primary"):
             infos = demarrer_connexion()
-            st.session_state["device_code"] = infos["device_code"]
-            st.session_state["user_code"] = infos["user_code"]
-            st.session_state["verification_url"] = infos["verification_url"]
-            st.session_state["expires_in"] = infos["expires_in"]
-            st.session_state["interval"] = infos["interval"]
+            st.session_state["dc"] = infos["device_code"]
+            st.session_state["uc"] = infos["user_code"]
+            st.session_state["vu"] = infos["verification_url"]
+            st.session_state["exp"] = infos["expires_in"]
+            st.session_state["iv"] = infos["interval"]
             st.rerun()
     else:
-        url_complete = f"{st.session_state['verification_url']}/{st.session_state['user_code']}"
-        col_g, col_d = st.columns(2)
-        with col_g:
-            st.markdown(f'<a href="{url_complete}" target="_blank" style="display:inline-block; background-color:#00A392; color:white; padding:0.8em 1.6em; border-radius:10px; text-decoration:none; font-weight:600;">Autoriser l\'accès</a>', unsafe_allow_html=True)
-            st.caption("Sur cet appareil ou un autre.")
-            st.info(f"Code : **{st.session_state['user_code']}**")
-        with col_d:
-            st.image(generer_qr_code(url_complete), width=160)
+        url = f"{st.session_state['vu']}/{st.session_state['uc']}"
+        cg, cd = st.columns(2)
+        with cg:
+            st.markdown(f'<a href="{url}" target="_blank" style="display:inline-block; background:linear-gradient(135deg,#00A392,#007D70); color:white; padding:0.9em 1.7em; border-radius:12px; text-decoration:none; font-weight:700;">Autoriser l\'accès</a>', unsafe_allow_html=True)
+            st.caption("Sur n'importe quel appareil.")
+            st.info(f"Code : **{st.session_state['uc']}**")
+        with cd:
+            st.image(qrcode_img(url), width=160)
             st.caption("Ou scanne le QR code.")
         st.caption("La page se met à jour automatiquement.")
         with st.spinner("Attente de l'autorisation..."):
-            tps = 0
-            while tps < st.session_state["expires_in"]:
-                time.sleep(st.session_state["interval"])
-                tps += st.session_state["interval"]
-                try:
-                    tokens = verifier_connexion(st.session_state["device_code"])
-                except Exception as e:
-                    st.error(str(e))
-                    break
-                if tokens:
-                    sauvegarder_connexion(tokens)
-                    del st.session_state["device_code"]
+            t = 0
+            while t < st.session_state["exp"]:
+                time.sleep(st.session_state["iv"])
+                t += st.session_state["iv"]
+                tok = verifier_connexion(st.session_state["dc"])
+                if tok:
+                    sauvegarder_connexion(tok)
+                    del st.session_state["dc"]
                     st.rerun()
+        st.error("Le temps est écoulé.")
         if st.button("Réessayer"):
             st.rerun()
 
-def page_tableau_de_bord(user_tz):
-    if afficher_bloc_lancement():
+def page_dashboard(utz):
+    if bloc_lancement():
         return
-    histo = st.session_state["historique"]
-    resultats = st.session_state["resultats"]
-    stats_listes = st.session_state["stats_listes"]
-    doublons = st.session_state["doublons"]
-    playback = st.session_state["playback"]
+    h = st.session_state["historique"]
+    res = st.session_state["res"]
+    stats = st.session_state["stats"]
+    doub = st.session_state["doub"]
+    pb = st.session_state["pb"]
 
-    # Calcul temps total
-    total_heures = sum(m["duree"] for m in histo["films_details"]) / 60 + sum(e["duree"] for e in histo["episodes_details"]) / 60
+    th = sum(m["duree"] for m in h["films_det"])/60 + sum(e["duree"] for e in h["ep_det"])/60
+    total_items = sum(s["total"] for s in stats)
 
     st.subheader("📊 Vue d'ensemble")
-    # Première ligne de métriques
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🎬 Films", histo["nb_films"])
-    c2.metric("📺 Séries", histo["nb_series"])
-    c3.metric("🎞️ Épisodes", histo["nb_episodes"])
-    c4.metric("⏱️ Temps total", format_duree(total_heures))
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("🎬 Films", h["nb_films"])
+    c2.metric("📺 Séries", h["nb_series"])
+    c3.metric("🎞️ Épisodes", h["nb_ep"])
+    c4.metric("⏱️ Temps total", format_duree(th))
 
     st.divider()
     st.subheader("⚠️ État du nettoyage")
-    c5, c6, c7 = st.columns(3)
+    c5,c6,c7,c8 = st.columns(4)
 
-    # Fantômes
     with c5:
         with st.container(border=True):
-            st.markdown("#### 👻 Progressions fantômes")
-            st.metric("Nombre", len(playback))
-            if len(playback) > 0:
-                st.warning(f"{len(playback)} fantôme(s) à nettoyer")
-                if st.button("Aller au nettoyage →", key="btn_fantomes"):
-                    st.session_state["page_active"] = "👻 Progression Fantôme"
-                    st.rerun()
+            st.markdown("#### 👻 Fantômes")
+            if len(pb) > 0:
+                pct_pb = round(len(pb)/max(len(pb)+h["nb_vf"]+h["nb_ep"], 1)*100, 1)
+                st.metric("Nombre", len(pb), delta=f"{pct_pb}% des progressions")
+                st.warning(f"{len(pb)} fantôme(s) à nettoyer")
+                if st.button("Nettoyer →", key="b_pb"):
+                    aller_a("👻 Progression Fantôme")
             else:
-                st.success("✅ 0 fantôme, c'est propre !")
-    # Doublons
+                st.metric("Nombre", 0)
+                st.success("✅ Rien à nettoyer")
     with c6:
         with st.container(border=True):
             st.markdown("#### 🔁 Doublons")
-            st.metric("Nombre", len(doublons))
-            if len(doublons) > 0:
-                st.warning(f"{len(doublons)} doublon(s) détecté(s)")
-                if st.button("Voir les doublons →", key="btn_doublons"):
-                    st.session_state["page_active"] = "🔍 Recherche de doublons"
-                    st.rerun()
+            if len(doub) > 0:
+                pct_d = round(len(doub)/max(total_items,1)*100, 1)
+                st.metric("Nombre", len(doub), delta=f"{pct_d}% des listes")
+                st.warning(f"{len(doub)} doublon(s)")
+                if st.button("Voir →", key="b_d"):
+                    aller_a("🔍 Recherche de doublons")
             else:
-                st.success("✅ Aucun doublon !")
-    # Contenus déjà vus
+                st.metric("Nombre", 0)
+                st.success("✅ Aucun doublon")
     with c7:
         with st.container(border=True):
-            st.markdown("#### 🧹 Contenus déjà vus")
-            total_items = sum(s["total"] for s in stats_listes)
-            pct = round(len(resultats)/total_items*100, 1) if total_items > 0 else 0
-            st.metric("Nombre", len(resultats), delta=f"{pct}% des listes")
-            if len(resultats) > 0:
-                st.warning(f"{len(resultats)} contenu(s) déjà vu(s)")
-                if st.button("Nettoyer les listes →", key="btn_vus"):
-                    st.session_state["page_active"] = "🧹 Nettoyage des listes"
-                    st.rerun()
+            st.markdown("#### 🧹 Déjà vus")
+            if len(res) > 0:
+                pct_r = round(len(res)/max(total_items,1)*100,1)
+                st.metric("Nombre", len(res), delta=f"{pct_r}% des listes")
+                st.warning(f"{len(res)} contenu(s) vus")
+                if st.button("Nettoyer →", key="b_r"):
+                    aller_a("🧹 Nettoyage des listes")
             else:
-                st.success("✅ Listes à jour !")
+                st.metric("Nombre", 0)
+                st.success("✅ Listes à jour")
+    with c8:
+        with st.container(border=True):
+            st.markdown("#### 🚀 Nettoyage auto")
+            st.write("En 1 clic")
+            if st.button("🧹 Tout nettoyer", type="primary", use_container_width=True):
+                with st.spinner("Nettoyage en cours..."):
+                    sup_selection(st.session_state["access_token"], res)
+                    sup_playback(st.session_state["access_token"], pb)
+                    st.success(f"✅ {len(res)} contenus vus et {len(pb)} fantômes supprimés !")
+                    time.sleep(2)
+                    for k in ["res","stats","doub","doub_det","pb"]:
+                        st.session_state.pop(k, None)
+                    st.rerun()
 
-def page_nettoyage_listes(user_tz):
-    if afficher_bloc_lancement():
+def page_nettoyage(utz):
+    if bloc_lancement():
         return
-    resultats = st.session_state["resultats"]
-    stats_listes = st.session_state["stats_listes"]
-    cle_msg = "msg_suppression_vus"
-    if st.session_state.get(cle_msg):
-        st.success(st.session_state[cle_msg])
-        del st.session_state[cle_msg]
+    res = st.session_state["res"]
+    stats = st.session_state["stats"]
+    msg = "msg_sup_vus"
+    if st.session_state.get(msg):
+        st.success(st.session_state[msg])
+        del st.session_state[msg]
     st.subheader("🧹 Nettoyage des listes")
-    st.caption("Retire les films/séries que tu as déjà vus de ta liste de suivi.")
-    if not resultats:
-        st.success("Aucun contenu déjà vu dans tes listes. C'est parfait ! 🎉")
+    st.caption("Retire les films et séries déjà vus.")
+    if not res:
+        st.success("Tes listes sont parfaitement à jour ! 🎉")
     else:
-        st.write(f"**{len(resultats)}** contenu(s) déjà vu(s) trouvé(s). Coche ceux à supprimer :")
-        tab = pd.DataFrame(resultats)
-        tab_aff = tab[["type", "titre", "annee", "vues", "dernier_visionnage", "liste"]].copy()
-        tab_aff["dernier_visionnage"] = pd.to_datetime(tab_aff["dernier_visionnage"]).dt.tz_convert(user_tz).dt.strftime("%d/%m/%Y %H:%M")
-        tab_aff.insert(0, "Sélectionner", False)
-        tab_aff.columns = ["Sélectionner", "Type", "Titre", "Année", "Vues", "Dernier visionnage", "Liste"]
-        edite = st.data_editor(tab_aff, use_container_width=True, hide_index=True, disabled=["Type", "Titre", "Année", "Vues", "Dernier visionnage", "Liste"], key="edit_vus")
-        nb_sel = int(edite["Sélectionner"].sum())
-        if nb_sel:
-            cle_conf = "conf_vus"
-            if not st.session_state.get(cle_conf, False):
-                if st.button(f"🗑️ Supprimer {nb_sel} élément(s)", type="primary"):
-                    st.session_state[cle_conf] = True
+        st.write(f"**{len(res)}** contenu(s) déjà vu(s) détecté(s).")
+        tab = pd.DataFrame(res)
+        ta = tab[["type","titre","annee","vues","dernier","liste"]].copy()
+        ta["dernier"] = pd.to_datetime(ta["dernier"]).dt.tz_convert(utz).dt.strftime("%d/%m/%Y %H:%M")
+        ta.insert(0, "Sel", False)
+        ta.columns = ["Sel","Type","Titre","Année","Vues","Dernier","Liste"]
+        ed = st.data_editor(ta, use_container_width=True, hide_index=True, disabled=["Type","Titre","Année","Vues","Dernier","Liste"], key="ed_vus")
+        nb = int(ed["Sel"].sum())
+        if nb:
+            conf = "conf_vus"
+            if not st.session_state.get(conf, False):
+                if st.button(f"🗑️ Supprimer {nb} élément(s)", type="primary"):
+                    st.session_state[conf] = True
                     st.rerun()
             else:
-                st.warning(f"Confirmer la suppression ?")
-                co, cn = st.columns(2)
+                st.warning("Confirmer la suppression ?")
+                co,cn = st.columns(2)
                 with co:
                     if st.button("✅ Oui"):
-                        idx = edite[edite["Sélectionner"]].index
-                        items = [resultats[i] for i in idx]
+                        idx = ed[ed["Sel"]].index
+                        items = [res[i] for i in idx]
                         with st.spinner("Suppression..."):
-                            supprimer_selection(st.session_state["access_token"], items)
-                        st.session_state[cle_conf] = False
-                        st.session_state[cle_msg] = f"✅ {len(items)} élément(s) supprimé(s)."
+                            sup_selection(st.session_state["access_token"], items)
+                        st.session_state[conf] = False
+                        st.session_state[msg] = f"✅ {len(items)} élément(s) supprimé(s)."
                         st.rerun()
                 with cn:
                     if st.button("❌ Annuler"):
-                        st.session_state[cle_conf] = False
+                        st.session_state[conf] = False
                         st.rerun()
     st.divider()
-    st.subheader("Taux de contenu à nettoyer par liste")
-    df_sl = pd.DataFrame(stats_listes)
-    df_sl["% nettoyable"] = (df_sl["deja_vus"] / df_sl["total"].replace(0, 1)*100).round(1)
-    st.bar_chart(df_sl.set_index("nom")["% nettoyable"], color="#CEDC00")
-    st.caption("Ce graphique te permet de voir rapidement quelle liste a le plus grand besoin de nettoyage.")
+    st.subheader("Taux de nettoyage par liste")
+    df = pd.DataFrame(stats)
+    df["% nettoyable"] = (df["vus"]/df["total"].replace(0,1)*100).round(1)
+    st.bar_chart(df.set_index("nom")["% nettoyable"], color="#CEDC00")
+    st.caption("Permet de voir quelle liste a besoin d'un nettoyage en priorité.")
 
-def page_doublons(user_tz):
-    if afficher_bloc_lancement():
+def page_doublons(utz):
+    if bloc_lancement():
         return
-    doublons_detail = st.session_state["doublons_detail"]
-    cle_msg = "msg_suppression_doublons"
-    if st.session_state.get(cle_msg):
-        st.success(st.session_state[cle_msg])
-        del st.session_state[cle_msg]
+    dd = st.session_state["doub_det"]
+    msg = "msg_sup_d"
+    if st.session_state.get(msg):
+        st.success(st.session_state[msg])
+        del st.session_state[msg]
     st.subheader("🔍 Recherche de doublons")
-    st.caption("Trouve les contenus présents dans plusieurs listes à la fois.")
-    if not doublons_detail:
-        st.success("Aucun doublon.")
+    st.caption("Trouve les contenus présents dans plusieurs listes.")
+    if not dd:
+        st.success("Aucun doublon !")
     else:
-        st.write(f"**{len(st.session_state['doublons'])}** doublon(s) détecté(s).")
-        tab = pd.DataFrame(doublons_detail)
-        tab_aff = tab[["type", "titre", "annee", "liste"]].copy()
-        tab_aff.insert(0, "Sélectionner", False)
-        tab_aff.columns = ["Sélectionner", "Type", "Titre", "Année", "Liste"]
-        edite = st.data_editor(tab_aff, use_container_width=True, hide_index=True, disabled=["Type", "Titre", "Année", "Liste"], key="edit_doublons")
-        nb_sel = int(edite["Sélectionner"].sum())
-        if nb_sel:
-            cle_conf = "conf_doublons"
-            if not st.session_state.get(cle_conf, False):
-                if st.button(f"🗑️ Retirer {nb_sel} élément(s)", type="primary"):
-                    st.session_state[cle_conf] = True
+        st.write(f"**{len(st.session_state['doub'])}** doublon(s) détecté(s).")
+        tab = pd.DataFrame(dd)
+        ta = tab[["type","titre","annee","liste"]].copy()
+        ta.insert(0, "Sel", False)
+        ta.columns = ["Sel","Type","Titre","Année","Liste"]
+        ed = st.data_editor(ta, use_container_width=True, hide_index=True, disabled=["Type","Titre","Année","Liste"], key="ed_d")
+        nb = int(ed["Sel"].sum())
+        if nb:
+            conf = "conf_d"
+            if not st.session_state.get(conf, False):
+                if st.button(f"🗑️ Retirer {nb} élément(s)", type="primary"):
+                    st.session_state[conf] = True
                     st.rerun()
             else:
                 st.warning("Confirmer ?")
-                co, cn = st.columns(2)
+                co,cn = st.columns(2)
                 with co:
                     if st.button("✅ Oui"):
-                        idx = edite[edite["Sélectionner"]].index
-                        items = [doublons_detail[i] for i in idx]
+                        idx = ed[ed["Sel"]].index
+                        items = [dd[i] for i in idx]
                         with st.spinner("Suppression..."):
-                            supprimer_selection(st.session_state["access_token"], items)
-                        st.session_state[cle_conf] = False
-                        st.session_state[cle_msg] = f"✅ {len(items)} élément(s) retiré(s)."
+                            sup_selection(st.session_state["access_token"], items)
+                        st.session_state[conf] = False
+                        st.session_state[msg] = f"✅ {len(items)} élément(s) retiré(s)."
                         st.rerun()
                 with cn:
                     if st.button("❌ Annuler"):
-                        st.session_state[cle_conf] = False
+                        st.session_state[conf] = False
                         st.rerun()
 
-def page_fantomes(user_tz):
-    if afficher_bloc_lancement():
+def page_fantomes(utz):
+    if bloc_lancement():
         return
-    playback = st.session_state["playback"]
-    cle_msg = "msg_suppression_fantomes"
-    if st.session_state.get(cle_msg):
-        st.success(st.session_state[cle_msg])
-        del st.session_state[cle_msg]
+    pb = st.session_state["pb"]
+    msg = "msg_sup_pb"
+    if st.session_state.get(msg):
+        st.success(st.session_state[msg])
+        del st.session_state[msg]
     st.subheader("👻 Progression Fantôme")
     st.caption("Supprime les entrées bloquées dans 'Continuer à regarder'.")
     st.divider()
-    if not playback:
+    if not pb:
         st.success("Aucune progression en cours.")
     else:
         tout = st.checkbox("Tout sélectionner")
-        selections = {}
-        for item in playback:
-            pct = item["progression"]
-            cls = "progress-low" if pct < 30 else "progress-mid" if pct < 80 else "progress-high"
-            date_f = formater_date(item["dernier_visionnage"], user_tz)
-            icone = "🎬" if item["type"] == "Film" else "📺"
+        sels = {}
+        for it in pb:
+            p = it["prog"]
+            cls = "progress-low" if p<30 else "progress-mid" if p<80 else "progress-high"
+            df = formater_date(it["dernier"], utz)
+            ic = "🎬" if it["type"] == "Film" else "📺"
             with st.container():
                 cc, cd = st.columns([0.05, 0.95])
                 with cc:
-                    selections[item["playback_id"]] = st.checkbox("", value=tout, key=f"chk_{item['playback_id']}", label_visibility="collapsed")
+                    sels[it["pid"]] = st.checkbox("", value=tout, key=f"c_{it['pid']}", label_visibility="collapsed")
                 with cd:
                     st.markdown(f"""
                     <div class="ghost-card">
-                        <div class="ghost-title">{icone} {item['titre']} {f'({item["annee"]})' if item["annee"] else ''}</div>
-                        <div class="ghost-meta">{item['type']} • {pct}% • 🕒 {date_f}</div>
+                        <div class="ghost-title">{ic} {it['titre']} {f'({it["annee"]})' if it["annee"] else ''}</div>
+                        <div class="ghost-meta">{it['type']} • {p}% • 🕒 {df}</div>
                         <div class="progress-bar-container">
-                            <div class="progress-bar-fill {cls}" style="width: {pct}%"></div>
+                            <div class="progress-bar-fill {cls}" style="width: {p}%"></div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
         st.divider()
-        ids_sel = [pid for pid, s in selections.items() if s]
-        if ids_sel:
-            cle_conf = "conf_fantomes"
-            if not st.session_state.get(cle_conf, False):
-                if st.button(f"🗑️ Supprimer {len(ids_sel)} progression(s)", type="primary"):
-                    st.session_state[cle_conf] = True
+        ids = [pid for pid, s in sels.items() if s]
+        if ids:
+            conf = "conf_pb"
+            if not st.session_state.get(conf, False):
+                if st.button(f"🗑️ Supprimer {len(ids)} progression(s)", type="primary"):
+                    st.session_state[conf] = True
                     st.rerun()
             else:
                 st.warning("Confirmer ?")
-                co, cn = st.columns(2)
+                co,cn = st.columns(2)
                 with co:
                     if st.button("✅ Oui"):
-                        items = [p for p in playback if p["playback_id"] in ids_sel]
+                        items = [p for p in pb if p["pid"] in ids]
                         with st.spinner("Suppression..."):
-                            supprimer_progressions(st.session_state["access_token"], items)
-                        st.session_state[cle_conf] = False
-                        st.session_state[cle_msg] = f"✅ {len(items)} fantôme(s) supprimé(s)."
+                            sup_playback(st.session_state["access_token"], items)
+                        st.session_state[conf] = False
+                        st.session_state[msg] = f"✅ {len(items)} fantôme(s) supprimé(s)."
                         st.rerun()
                 with cn:
                     if st.button("❌ Annuler"):
-                        st.session_state[cle_conf] = False
+                        st.session_state[conf] = False
                         st.rerun()
-        else:
-            st.info("Coche les éléments à supprimer.")
 
-def page_statistiques(user_tz):
-    if afficher_bloc_lancement():
+def page_stats(utz):
+    if bloc_lancement():
         return
     st.subheader("📊 Statistiques détaillées")
-    st.caption("Toutes tes données de visionnage, comme Trakt VIP / Cinopsys.")
-
-    histo = st.session_state["historique"]
-    films = pd.DataFrame(histo["films_details"])
-    episodes = pd.DataFrame(histo["episodes_details"])
+    st.caption("Toutes tes données de visionnage.")
+    h = st.session_state["historique"]
+    films = pd.DataFrame(h["films_det"])
+    eps = pd.DataFrame(h["ep_det"])
 
     # Filtres
-    f1, f2, f3 = st.columns(3)
+    f1,f2,f3 = st.columns(3)
     with f1:
-        type_c = st.selectbox("Type de contenu", ["Tous", "Films", "Séries"])
+        tc = st.selectbox("Type", ["Tous", "Films", "Séries"])
     with f2:
-        periode = st.selectbox("Période", ["Tout", "Cette année", "12 derniers mois", "Ce mois-ci", "Aujourd'hui"])
+        min_d, max_d = None, None
+        for df in [films, eps]:
+            if not df.empty:
+                dates = pd.to_datetime(df["date"], utc=True).dt.tz_convert(utz)
+                if min_d is None or dates.min() < min_d:
+                    min_d = dates.min().to_pydatetime()
+                if max_d is None or dates.max() > max_d:
+                    max_d = dates.max().to_pydatetime()
+        if min_d:
+            periode = st.date_input("Période", value=(min_d.date(), max_d.date()), min_value=min_d.date(), max_value=max_d.date())
     with f3:
-        genres_dispo = set()
-        if type_c in ["Tous", "Films"] and not films.empty:
+        genres = set()
+        if tc in ["Tous","Films"] and not films.empty:
             for g in films["genre"].str.split(", "):
-                genres_dispo.update([x for x in g if x != "Inconnu"])
-        if type_c in ["Tous", "Séries"] and not episodes.empty:
-            for g in episodes["genre"].str.split(", "):
-                genres_dispo.update([x for x in g if x != "Inconnu"])
-        genre = st.selectbox("Genre", ["Tous"] + sorted(genres_dispo))
+                genres.update([x for x in g if x != "Inconnu"])
+        if tc in ["Tous","Séries"] and not eps.empty:
+            for g in eps["genre"].str.split(", "):
+                genres.update([x for x in g if x != "Inconnu"])
+        genre = st.selectbox("Genre", ["Tous"] + sorted(genres))
 
-    # Construction df complet
+    # Construction df
     dfs = []
-    if type_c in ["Tous", "Films"] and not films.empty:
+    if tc in ["Tous","Films"] and not films.empty:
         df = films.copy()
         df["type"] = "Film"
-        df["date"] = pd.to_datetime(df["date_visionnage"], utc=True).dt.tz_convert(user_tz)
+        df["date_dt"] = pd.to_datetime(df["date"], utc=True).dt.tz_convert(utz)
         dfs.append(df)
-    if type_c in ["Tous", "Séries"] and not episodes.empty:
-        df = episodes.copy()
+    if tc in ["Tous","Séries"] and not eps.empty:
+        df = eps.copy()
         df["type"] = "Épisode"
         df["titre"] = df["serie"]
-        df["date"] = pd.to_datetime(df["date_visionnage"], utc=True).dt.tz_convert(user_tz)
+        df["date_dt"] = pd.to_datetime(df["date"], utc=True).dt.tz_convert(utz)
         dfs.append(df)
     if not dfs:
         st.info("Aucune donnée.")
         return
     df = pd.concat(dfs, ignore_index=True)
-    mt = datetime.now(user_tz)
-    if periode == "Cette année":
-        df = df[df["date"].dt.year == mt.year]
-    elif periode == "12 derniers mois":
-        df = df[df["date"] >= mt - pd.DateOffset(months=12)]
-    elif periode == "Ce mois-ci":
-        df = df[(df["date"].dt.year == mt.year) & (df["date"].dt.month == mt.month)]
-    elif periode == "Aujourd'hui":
-        df = df[(df["date"].dt.date == mt.date())]
+
+    # Filtre période
+    if isinstance(periode, tuple) and len(periode) == 2:
+        d_deb, d_fin = periode
+        df = df[(df["date_dt"].dt.date >= d_deb) & (df["date_dt"].dt.date <= d_fin)]
+    # Filtre genre
     if genre != "Tous":
         df = df[df["genre"].str.contains(genre, na=False)]
     if df.empty:
-        st.warning("Aucun résultat pour ces filtres.")
+        st.warning("Aucun résultat.")
         return
 
-    df["duree_h"] = df["duree"].fillna(40) / 60
-    total_h = df["duree_h"].sum()
+    df["duree_h"] = df["duree"].fillna(40)/60
+    th = df["duree_h"].sum()
 
     # Métriques
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1,m2,m3,m4,m5 = st.columns(5)
     m1.metric("Visionnages", len(df))
-    m2.metric("Temps total", format_duree(total_h))
-    note_moy = df[df["note"] > 0]["note"].mean() if "note" in df.columns else 0
-    m3.metric("Note moyenne", f"{round(note_moy,1)}/10" if note_moy == note_moy else "-")
-    moy_vue_par_jour = len(df) / max((df["date"].max() - df["date"].min()).days + 1, 1)
-    m4.metric("Moyenne / jour", f"{round(moy_vue_par_jour,1)}")
-    marathon = df.sort_values("date").groupby(df["date"].dt.date).size().max()
-    m5.metric("Record en 1 jour", f"{marathon} contenu{'s' if marathon>1 else ''}")
+    m2.metric("Temps total", format_duree(th))
+    nm = df[df["note"]>0]["note"].mean()
+    m3.metric("Note moy", f"{round(nm,1)}/10" if pd.notna(nm) else "-")
+    nb_jours = max((df["date_dt"].max() - df["date_dt"].min()).days + 1, 1)
+    m4.metric("Moy / jour", f"{round(len(df)/nb_jours,1)}")
+    marathon = df.groupby(df["date_dt"].dt.date).size().max()
+    m5.metric("Record / jour", f"{marathon}")
+
+    # Détection Marathon
+    marathons = []
+    if tc in ["Tous", "Séries"] and not eps.empty:
+        ep_jour = eps.copy()
+        ep_jour["date_dt"] = pd.to_datetime(ep_jour["date"], utc=True).dt.tz_convert(utz)
+        ep_jour["jour"] = ep_jour["date_dt"].dt.date
+        comptage = ep_jour.groupby(["jour", "serie"]).size().reset_index(name="nb")
+        marathons = comptage[comptage["nb"] >= 4].sort_values("nb", ascending=False)
+    if not marathons.empty:
+        st.divider()
+        with st.container(border=True):
+            st.markdown("#### 🏆 Marathons détectés (4+ épisodes d'une même série en 1 jour)")
+            for _, row in marathons.head(5).iterrows():
+                st.write(f"📅 **{row['jour']}** : {row['nb']} épisodes de **{row['serie']}**")
 
     st.divider()
 
-    # Graphiques
-    # Par mois
-    df["mois"] = df["date"].dt.strftime("%Y-%m")
-    h_par_mois = df.groupby("mois")["duree_h"].sum().round(1)
-    opt_mois = {"title": {"text": "Heures par mois", "textStyle": {"color": "#F0FAF8"}}, "tooltip": {"trigger": "axis"}, "backgroundColor": "transparent", "textStyle": {"color": "#F0FAF8"}, "xAxis": {"type": "category", "data": list(h_par_mois.index), "axisLabel": {"color": "#9DC5BF"}}, "yAxis": {"type": "value", "axisLabel": {"color": "#9DC5BF"}, "splitLine": {"lineStyle": {"color": "#125A54"}}}, "series": [{"data": list(h_par_mois.values), "type": "line", "smooth": True, "lineStyle": {"color": "#CEDC00", "width":3}, "areaStyle": {"color": "rgba(206,220,0,0.1)"}, "itemStyle": {"color": "#CEDC00"}}]}
-    st_echarts(opt_mois, height="350px")
+    # Graphique mois
+    df["mois"] = df["date_dt"].dt.strftime("%Y-%m")
+    h_mois = df.groupby("mois")["duree_h"].sum().round(1)
+    opt_m = {"title":{"text":"Heures par mois","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":list(h_mois.index),"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"line","smooth":True,"lineStyle":{"color":"#CEDC00","width":3},"areaStyle":{"color":"rgba(206,220,0,0.1)"},"itemStyle":{"color":"#CEDC00"}}]}
+    st_echarts(opt_m, height="350px")
 
-    g1, g2 = st.columns(2)
-    # Genres
+    g1,g2 = st.columns(2)
     with g1:
         genres = {}
-        for liste_g in df["genre"].str.split(", "):
-            for g in liste_g:
+        for lg in df["genre"].str.split(", "):
+            for g in lg:
                 if g and g != "Inconnu":
-                    genres[g] = genres.get(g, 0) +1
-        opt_genres = {"title": {"text": "Genres les plus regardés", "left": "center", "textStyle": {"color": "#F0FAF8"}}, "tooltip": {"trigger": "item"}, "backgroundColor": "transparent", "textStyle": {"color": "#F0FAF8"}, "legend": {"bottom": 0, "textStyle": {"color": "#9DC5BF"}}, "series": [{"type": "pie", "radius": ["40%", "70%"], "data": [{"name":k, "value":v} for k,v in sorted(genres.items(), key=lambda x:-x[1])[:8]], "itemStyle": {"borderRadius": 8, "borderColor": "#04332F", "borderWidth":2}, "label": {"color": "#F0FAF8"}}], "color": ["#00A392", "#CEDC00", "#00C7B3", "#A3B300", "#007D70", "#869400", "#125A54", "#E8F064"]}
-        st_echarts(opt_genres, height="400px")
-    # Heures de la journée
+                    genres[g] = genres.get(g,0)+1
+        opt_g = {"title":{"text":"Genres","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"name":k,"value":v} for k,v in sorted(genres.items(), key=lambda x:-x[1])[:8]],"itemStyle":{"borderRadius":8,"borderColor":"#052F2C","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#CEDC00","#00C7B3","#A3B300","#007D70","#869400","#125A54","#E8F064"]}
+        st_echarts(opt_g, height="400px")
     with g2:
-        df["h"] = df["date"].dt.hour
-        h_par_h = df.groupby("h")["duree_h"].sum().reindex(range(24), fill_value=0).round(1)
-        opt_heures = {"title": {"text": "Par heure de la journée", "left": "center", "textStyle": {"color": "#F0FAF8"}}, "tooltip": {"trigger": "axis"}, "backgroundColor": "transparent", "textStyle": {"color": "#F0FAF8"}, "xAxis": {"type": "category", "data": [f"{h}h" for h in range(24)], "axisLabel": {"color": "#9DC5BF"}}, "yAxis": {"type": "value", "axisLabel": {"color": "#9DC5BF"}, "splitLine": {"lineStyle": {"color": "#125A54"}}}, "series": [{"data": list(h_par_h.values), "type": "bar", "itemStyle": {"color": {"type":"linear", "x":0, "y":0, "x2":0, "y2":1, "colorStops": [{"offset":0, "color":"#00A392"}, {"offset":1, "color":"#007D70"}]}, "borderRadius": [4,4,0,0]}}]}
-        st_echarts(opt_heures, height="400px")
+        df["h"] = df["date_dt"].dt.hour
+        hh = df.groupby("h")["duree_h"].sum().reindex(range(24), fill_value=0).round(1)
+        opt_h = {"title":{"text":"Par heure de la journée","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis"},"backgroundColor":"transparent","xAxis":{"type":"category","data":[f"{h}h" for h in range(24)],"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(hh.values),"type":"bar","itemStyle":{"color":{"type":"linear","x":0,"y":0,"x2":0,"y2":1,"colorStops":[{"offset":0,"color":"#00A392"},{"offset":1,"color":"#007D70"}]},"borderRadius":[4,4,0,0]}}]}
+        st_echarts(opt_h, height="400px")
 
-    g3, g4 = st.columns(2)
-    # Par jour de la semaine
+    g3,g4 = st.columns(2)
     with g3:
-        jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-        df["jour_semaine"] = df["date"].dt.weekday
-        h_par_jour = df.groupby("jour_semaine")["duree_h"].sum().reindex(range(7), fill_value=0).round(1)
-        opt_jours = {"title": {"text": "Par jour de la semaine", "left": "center", "textStyle": {"color": "#F0FAF8"}}, "tooltip": {"trigger": "axis"}, "backgroundColor": "transparent", "textStyle": {"color": "#F0FAF8"}, "xAxis": {"type": "category", "data": jours, "axisLabel": {"color": "#9DC5BF"}}, "yAxis": {"type": "value", "axisLabel": {"color": "#9DC5BF"}, "splitLine": {"lineStyle": {"color": "#125A54"}}}, "series": [{"data": list(h_par_jour.values), "type": "bar", "itemStyle": {"color": "#CEDC00", "borderRadius": [4,4,0,0]}}]}
-        st_echarts(opt_jours, height="400px")
-    # Répartition films / séries
+        jours = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
+        df["jsem"] = df["date_dt"].dt.weekday
+        hj = df.groupby("jsem")["duree_h"].sum().reindex(range(7), fill_value=0).round(1)
+        opt_j = {"title":{"text":"Par jour de la semaine","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis"},"backgroundColor":"transparent","xAxis":{"type":"category","data":jours,"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(hj.values),"type":"bar","itemStyle":{"color":"#CEDC00","borderRadius":[4,4,0,0]}}]}
+        st_echarts(opt_j, height="400px")
     with g4:
-        rep_type = df.groupby("type")["duree_h"].sum().round(1)
-        opt_type = {"title": {"text": "Films vs Séries", "left": "center", "textStyle": {"color": "#F0FAF8"}}, "tooltip": {"trigger": "item"}, "backgroundColor": "transparent", "legend": {"bottom": 0, "textStyle": {"color": "#9DC5BF"}}, "series": [{"type": "pie", "radius": ["40%", "70%"], "data": [{"value": v, "name": k} for k,v in rep_type.items()], "itemStyle": {"borderRadius":8, "borderColor":"#04332F", "borderWidth":2}, "label": {"color":"#F0FAF8"}}], "color": ["#00A392", "#CEDC00"]}
-        st_echarts(opt_type, height="400px")
+        rt = df.groupby("type")["duree_h"].sum().round(1)
+        opt_t = {"title":{"text":"Films vs Séries","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"value":v,"name":k} for k,v in rt.items()],"itemStyle":{"borderRadius":8,"borderColor":"#052F2C","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#CEDC00"]}
+        st_echarts(opt_t, height="400px")
 
 def page_wrapped():
     st.subheader("🎬 Rendez-vous annuel")
-    st.info("🚧 Bientôt disponible : ton récap annuel façon Spotify Wrapped avec tes tops, statistiques et carte partageable !")
+    st.info("🚧 Bientôt : ton récapitulatif annuel façon Spotify Wrapped, avec carte partageable !")
 
 def page_sauvegarde():
     st.subheader("📤 Sauvegarde et restauration")
-    st.info("🚧 Bientôt : export complet de toutes tes données / listes / historique en JSON/Excel, et restauration.")
+    st.info("🚧 Bientôt : export/import complet de tes données en JSON/Excel.")
 
 def page_succes():
     st.subheader("🏆 Succès")
-    st.info("🚧 Bientôt : badges et objectifs : marathon du week-end, 100 films vus, série la plus longue, etc.")
+    st.info("🚧 Bientôt : badges et objectifs de visionnage !")
 
 # ==================================================
 # RECONNEXION AUTO
@@ -1096,9 +1159,9 @@ def page_succes():
 if "access_token" not in st.session_state:
     rt = cookies.get("trakt_refresh_token")
     if rt:
-        tokens = rafraichir_token(rt)
-        if tokens:
-            sauvegarder_connexion(tokens)
+        tok = rafraichir_token(rt)
+        if tok:
+            sauvegarder_connexion(tok)
         else:
             cookies.remove("trakt_refresh_token")
 
@@ -1106,25 +1169,24 @@ if "access_token" not in st.session_state:
 # LANCEMENT
 # ==================================================
 
-user_tz = afficher_entete()
-
+utz = entete()
 if "access_token" not in st.session_state:
     page_connexion()
 else:
-    page = navigation()
-    if page == "🏠 Tableau de bord":
-        page_tableau_de_bord(user_tz)
-    elif page == "👻 Progression Fantôme":
-        page_fantomes(user_tz)
-    elif page == "🧹 Nettoyage des listes":
-        page_nettoyage_listes(user_tz)
-    elif page == "🔍 Recherche de doublons":
-        page_doublons(user_tz)
-    elif page == "📊 Statistiques détaillées":
-        page_statistiques(user_tz)
-    elif page == "🎬 Rendez-vous annuel":
+    p = naviguer()
+    if p == "🏠 Tableau de bord":
+        page_dashboard(utz)
+    elif p == "👻 Progression Fantôme":
+        page_fantomes(utz)
+    elif p == "🧹 Nettoyage des listes":
+        page_nettoyage(utz)
+    elif p == "🔍 Recherche de doublons":
+        page_doublons(utz)
+    elif p == "📊 Statistiques":
+        page_stats(utz)
+    elif p == "🎬 Rendez-vous annuel":
         page_wrapped()
-    elif page == "📤 Sauvegarde / Restauration":
+    elif p == "📤 Sauvegarde":
         page_sauvegarde()
-    elif page == "🏆 Succès":
+    elif p == "🏆 Succès":
         page_succes()
