@@ -268,6 +268,15 @@ def obtenir_watchlist(access_token):
     return items_total
 
 
+def compter_types(items):
+    """Compte combien d'items Trakt (bruts) sont des films vs des séries."""
+
+    nb_films = sum(1 for i in items if i["type"] == "movie")
+    nb_series = sum(1 for i in items if i["type"] == "show")
+
+    return nb_films, nb_series
+
+
 def comparer_items_avec_historique(items, historique):
     """Compare une liste d'items (peu importe leur source) avec l'historique de visionnage."""
 
@@ -288,6 +297,7 @@ def comparer_items_avec_historique(items, historique):
                     "vues": vu["vues"],
                     "dernier_visionnage": vu["dernier_visionnage"],
                     "trakt_id": identifiant,
+                    "tmdb_id": film["ids"].get("tmdb"),
                 })
 
         elif item["type"] == "show":
@@ -303,6 +313,7 @@ def comparer_items_avec_historique(items, historique):
                     "vues": vu["vues"],
                     "dernier_visionnage": vu["dernier_visionnage"],
                     "trakt_id": identifiant,
+                    "tmdb_id": serie["ids"].get("tmdb"),
                 })
 
     return resultats
@@ -310,16 +321,34 @@ def comparer_items_avec_historique(items, historique):
 
 def analyser_tout(access_token, historique, barre=None):
     """Compare la watchlist + toutes les listes personnalisées avec l'historique.
-    Retourne : les contenus déjà vus, les stats par liste, et les doublons entre listes."""
+    Retourne : contenus déjà vus, stats par liste, doublons (résumé), doublons (détail par liste)."""
 
     resultats = []
     stats_listes = []
     apparitions = {}
 
-    def enregistrer_apparition(trakt_id, titre, annee, type_, nom_liste):
-        if trakt_id not in apparitions:
-            apparitions[trakt_id] = {"titre": titre, "annee": annee, "type": type_, "listes": []}
-        apparitions[trakt_id]["listes"].append(nom_liste)
+    def enregistrer_apparition(item, nom_liste, liste_id):
+        if item["type"] == "movie":
+            media, type_affiche = item["movie"], "Film"
+        elif item["type"] == "show":
+            media, type_affiche = item["show"], "Série"
+        else:
+            return
+
+        trakt_id = media["ids"]["trakt"]
+        cle = (type_affiche, trakt_id)  # type + id : évite qu'un film et une série au même numéro se mélangent
+
+        if cle not in apparitions:
+            apparitions[cle] = {
+                "titre": media["title"],
+                "annee": media["year"],
+                "type": type_affiche,
+                "trakt_id": trakt_id,
+                "tmdb_id": media["ids"].get("tmdb"),
+                "vu_dans": [],
+            }
+
+        apparitions[cle]["vu_dans"].append({"nom_liste": nom_liste, "liste_id": liste_id})
 
     if barre:
         barre.progress(0.7, text="Analyse de la watchlist...")
@@ -327,17 +356,22 @@ def analyser_tout(access_token, historique, barre=None):
     watchlist = obtenir_watchlist(access_token)
 
     for item in watchlist:
-        if item["type"] == "movie":
-            enregistrer_apparition(item["movie"]["ids"]["trakt"], item["movie"]["title"], item["movie"]["year"], "Film", "Watchlist")
-        elif item["type"] == "show":
-            enregistrer_apparition(item["show"]["ids"]["trakt"], item["show"]["title"], item["show"]["year"], "Série", "Watchlist")
+        enregistrer_apparition(item, "Watchlist", "watchlist")
 
     matches = comparer_items_avec_historique(watchlist, historique)
     for m in matches:
         m["liste"] = "Watchlist"
         m["liste_id"] = "watchlist"
     resultats.extend(matches)
-    stats_listes.append({"nom": "Watchlist (officielle)", "total": len(watchlist), "deja_vus": len(matches)})
+
+    nb_films, nb_series = compter_types(watchlist)
+    stats_listes.append({
+        "nom": "Watchlist (officielle)",
+        "nb_films": nb_films,
+        "nb_series": nb_series,
+        "total": len(watchlist),
+        "deja_vus": len(matches),
+    })
 
     listes = obtenir_listes(access_token)
 
@@ -349,10 +383,7 @@ def analyser_tout(access_token, historique, barre=None):
         items = obtenir_contenu_liste(access_token, liste["ids"]["trakt"])
 
         for item in items:
-            if item["type"] == "movie":
-                enregistrer_apparition(item["movie"]["ids"]["trakt"], item["movie"]["title"], item["movie"]["year"], "Film", liste["name"])
-            elif item["type"] == "show":
-                enregistrer_apparition(item["show"]["ids"]["trakt"], item["show"]["title"], item["show"]["year"], "Série", liste["name"])
+            enregistrer_apparition(item, liste["name"], liste["ids"]["trakt"])
 
         matches = comparer_items_avec_historique(items, historique)
         for m in matches:
@@ -360,20 +391,39 @@ def analyser_tout(access_token, historique, barre=None):
             m["liste_id"] = liste["ids"]["trakt"]
         resultats.extend(matches)
 
-        stats_listes.append({"nom": liste["name"], "total": len(items), "deja_vus": len(matches)})
+        nb_films, nb_series = compter_types(items)
+        stats_listes.append({
+            "nom": liste["name"],
+            "nb_films": nb_films,
+            "nb_series": nb_series,
+            "total": len(items),
+            "deja_vus": len(matches),
+        })
 
     doublons = []
+    doublons_detail = []
+
     for info in apparitions.values():
-        if len(info["listes"]) >= 2:
+        if len(info["vu_dans"]) >= 2:
             doublons.append({
                 "type": info["type"],
                 "titre": info["titre"],
                 "annee": info["annee"],
-                "nombre_listes": len(info["listes"]),
-                "listes": ", ".join(info["listes"]),
+                "tmdb_id": info["tmdb_id"],
+                "nombre_listes": len(info["vu_dans"]),
+                "listes": ", ".join(v["nom_liste"] for v in info["vu_dans"]),
             })
+            for v in info["vu_dans"]:
+                doublons_detail.append({
+                    "type": info["type"],
+                    "titre": info["titre"],
+                    "annee": info["annee"],
+                    "trakt_id": info["trakt_id"],
+                    "liste": v["nom_liste"],
+                    "liste_id": v["liste_id"],
+                })
 
-    return resultats, stats_listes, doublons
+    return resultats, stats_listes, doublons, doublons_detail
 
 
 # ==================================================
@@ -470,24 +520,25 @@ def generer_excel(pseudo, historique, resultats, stats_listes, doublons):
 
     df_resultats = pd.DataFrame(resultats)
     if not df_resultats.empty:
-        df_resultats = df_resultats[["liste", "type", "titre", "annee", "vues", "dernier_visionnage"]].copy()
+        df_resultats = df_resultats[["liste", "type", "titre", "annee", "vues", "dernier_visionnage", "tmdb_id"]].copy()
         df_resultats["dernier_visionnage"] = pd.to_datetime(df_resultats["dernier_visionnage"]).dt.strftime("%d/%m/%Y")
-        df_resultats.columns = ["Liste", "Type", "Titre", "Année", "Vues", "Dernier visionnage"]
+        df_resultats.columns = ["Liste", "Type", "Titre", "Année", "Vues", "Dernier visionnage", "ID TMDB"]
     else:
-        df_resultats = pd.DataFrame(columns=["Liste", "Type", "Titre", "Année", "Vues", "Dernier visionnage"])
+        df_resultats = pd.DataFrame(columns=["Liste", "Type", "Titre", "Année", "Vues", "Dernier visionnage", "ID TMDB"])
 
     df_doublons = pd.DataFrame(doublons)
     if not df_doublons.empty:
-        df_doublons = df_doublons[["type", "titre", "annee", "nombre_listes", "listes"]].copy()
-        df_doublons.columns = ["Type", "Titre", "Année", "Nombre de listes", "Présent dans"]
+        df_doublons = df_doublons[["type", "titre", "annee", "tmdb_id", "nombre_listes", "listes"]].copy()
+        df_doublons.columns = ["Type", "Titre", "Année", "ID TMDB", "Nombre de listes", "Présent dans"]
     else:
-        df_doublons = pd.DataFrame(columns=["Type", "Titre", "Année", "Nombre de listes", "Présent dans"])
+        df_doublons = pd.DataFrame(columns=["Type", "Titre", "Année", "ID TMDB", "Nombre de listes", "Présent dans"])
 
     df_listes = pd.DataFrame(stats_listes)
     df_listes["% nettoyage possible"] = (
         df_listes["deja_vus"] / df_listes["total"].replace(0, 1) * 100
     ).round(1)
-    df_listes.columns = ["Liste", "Nombre de contenus", "Déjà vus", "% nettoyage possible"]
+    df_listes = df_listes[["nom", "nb_films", "nb_series", "total", "deja_vus", "% nettoyage possible"]]
+    df_listes.columns = ["Liste", "Film", "Série", "Nombre de contenus", "Déjà vus", "% nettoyage possible"]
 
     buffer = io.BytesIO()
 
@@ -526,6 +577,69 @@ def generer_excel(pseudo, historique, resultats, stats_listes, doublons):
     buffer_final.seek(0)
 
     return buffer_final.getvalue()
+
+
+# ==================================================
+# INTERFACE — TABLEAU SÉLECTIONNABLE RÉUTILISABLE
+# ==================================================
+
+def afficher_tableau_selectionnable(items, colonnes, noms_colonnes, cle, access_token):
+    """Affiche un tableau avec cases à cocher + suppression confirmée.
+    'items' est une liste de dicts contenant au moins : type, trakt_id, liste_id."""
+
+    tableau = pd.DataFrame(items)
+    tableau_affichage = tableau[colonnes].copy()
+
+    if "dernier_visionnage" in colonnes:
+        tableau_affichage["dernier_visionnage"] = pd.to_datetime(tableau_affichage["dernier_visionnage"]).dt.strftime("%d/%m/%Y")
+
+    tableau_affichage.insert(0, "Sélectionner", False)
+    tableau_affichage.columns = ["Sélectionner"] + noms_colonnes
+
+    edite = st.data_editor(
+        tableau_affichage,
+        use_container_width=True,
+        hide_index=True,
+        disabled=noms_colonnes,
+        key=f"editeur_{cle}",
+    )
+
+    nb_selectionnes = int(edite["Sélectionner"].sum())
+
+    if nb_selectionnes == 0:
+        return
+
+    cle_confirmation = f"confirmation_{cle}"
+
+    if not st.session_state.get(cle_confirmation, False):
+        if st.button(f"🗑️ Supprimer les {nb_selectionnes} élément(s) sélectionné(s)", key=f"bouton_{cle}"):
+            st.session_state[cle_confirmation] = True
+            st.rerun()
+        return
+
+    st.warning(f"Confirmer la suppression de {nb_selectionnes} élément(s) de tes listes Trakt ? Cette action est irréversible.")
+
+    col_oui, col_non = st.columns(2)
+
+    with col_oui:
+        if st.button("✅ Oui, supprimer", key=f"oui_{cle}"):
+            indices = edite[edite["Sélectionner"]].index
+            items_a_supprimer = [items[i] for i in indices]
+
+            with st.spinner("Suppression en cours..."):
+                supprimer_selection(access_token, items_a_supprimer)
+
+            st.session_state[cle_confirmation] = False
+            st.session_state["message_suppression"] = (
+                f"{len(items_a_supprimer)} élément(s) supprimé(s) de tes listes Trakt. "
+                f"Relance l'analyse (en haut) pour voir les données à jour."
+            )
+            st.rerun()
+
+    with col_non:
+        if st.button("❌ Annuler", key=f"non_{cle}"):
+            st.session_state[cle_confirmation] = False
+            st.rerun()
 
 
 # ==================================================
@@ -657,11 +771,12 @@ else:
             if "historique" not in st.session_state:
                 st.session_state["historique"] = obtenir_historique(st.session_state["access_token"], barre)
 
-            resultats, stats_listes, doublons = analyser_tout(st.session_state["access_token"], st.session_state["historique"], barre)
+            resultats, stats_listes, doublons, doublons_detail = analyser_tout(st.session_state["access_token"], st.session_state["historique"], barre)
 
             st.session_state["resultats"] = resultats
             st.session_state["stats_listes"] = stats_listes
             st.session_state["doublons"] = doublons
+            st.session_state["doublons_detail"] = doublons_detail
 
             barre.empty()
             st.rerun()
@@ -672,10 +787,33 @@ else:
         resultats = st.session_state["resultats"]
         stats_listes = st.session_state["stats_listes"]
         doublons = st.session_state["doublons"]
+        doublons_detail = st.session_state["doublons_detail"]
 
         if st.session_state.get("message_suppression"):
             st.success(st.session_state["message_suppression"])
 
+        col_relance_rapide, col_relance_totale = st.columns(2)
+
+        with col_relance_rapide:
+            if st.button("🔄 Relancer l'analyse des listes (rapide)"):
+                st.session_state.pop("message_suppression", None)
+                del st.session_state["resultats"]
+                del st.session_state["stats_listes"]
+                del st.session_state["doublons"]
+                del st.session_state["doublons_detail"]
+                st.rerun()
+
+        with col_relance_totale:
+            if st.button("🔃 Tout rafraîchir, historique inclus (plus long)"):
+                st.session_state.pop("message_suppression", None)
+                del st.session_state["historique"]
+                del st.session_state["resultats"]
+                del st.session_state["stats_listes"]
+                del st.session_state["doublons"]
+                del st.session_state["doublons_detail"]
+                st.rerun()
+
+        st.divider()
         st.subheader("📊 Statistiques")
 
         col1, col2, col3, col4 = st.columns(4)
@@ -709,6 +847,22 @@ else:
         st.bar_chart(df_stats_listes.set_index("nom")["% nettoyable"])
 
         st.divider()
+        st.subheader("🔁 Doublons entre listes")
+
+        if not doublons_detail:
+            st.info("Aucun doublon trouvé entre tes listes.")
+        else:
+            st.write(f"**{len(doublons)}** contenu(s) présent(s) dans plusieurs listes à la fois. Coche les lignes à retirer d'une liste précise :")
+
+            afficher_tableau_selectionnable(
+                doublons_detail,
+                colonnes=["type", "titre", "annee", "liste"],
+                noms_colonnes=["Type", "Titre", "Année", "Liste"],
+                cle="doublons",
+                access_token=st.session_state["access_token"],
+            )
+
+        st.divider()
         st.subheader("🧹 Contenus déjà vus")
 
         if not resultats:
@@ -716,74 +870,10 @@ else:
         else:
             st.write(f"**{len(resultats)}** contenu(s) déjà vu(s) trouvé(s). Coche ceux à supprimer :")
 
-            tableau = pd.DataFrame(resultats)
-            tableau_affichage = tableau[["type", "titre", "annee", "vues", "dernier_visionnage", "liste"]].copy()
-            tableau_affichage["dernier_visionnage"] = pd.to_datetime(tableau_affichage["dernier_visionnage"]).dt.strftime("%d/%m/%Y")
-            tableau_affichage.insert(0, "Sélectionner", False)
-            tableau_affichage.columns = ["Sélectionner", "Type", "Titre", "Année", "Vues", "Dernier visionnage", "Liste"]
-
-            edite = st.data_editor(
-                tableau_affichage,
-                use_container_width=True,
-                hide_index=True,
-                disabled=["Type", "Titre", "Année", "Vues", "Dernier visionnage", "Liste"],
-                key="editeur_resultats",
+            afficher_tableau_selectionnable(
+                resultats,
+                colonnes=["type", "titre", "annee", "vues", "dernier_visionnage", "liste"],
+                noms_colonnes=["Type", "Titre", "Année", "Vues", "Dernier visionnage", "Liste"],
+                cle="deja_vus",
+                access_token=st.session_state["access_token"],
             )
-
-            nb_selectionnes = int(edite["Sélectionner"].sum())
-
-            if nb_selectionnes > 0:
-
-                if not st.session_state.get("confirmation_suppression", False):
-
-                    if st.button(f"🗑️ Supprimer les {nb_selectionnes} élément(s) sélectionné(s)"):
-                        st.session_state["confirmation_suppression"] = True
-                        st.rerun()
-
-                else:
-
-                    st.warning(f"Confirmer la suppression de {nb_selectionnes} élément(s) de tes listes Trakt ? Cette action est irréversible.")
-
-                    col_oui, col_non = st.columns(2)
-
-                    with col_oui:
-                        if st.button("✅ Oui, supprimer"):
-
-                            indices = edite[edite["Sélectionner"]].index
-                            items_a_supprimer = [resultats[i] for i in indices]
-
-                            with st.spinner("Suppression en cours..."):
-                                supprimer_selection(st.session_state["access_token"], items_a_supprimer)
-
-                            st.session_state["confirmation_suppression"] = False
-                            st.session_state["message_suppression"] = (
-                                f"{len(items_a_supprimer)} élément(s) supprimé(s) de tes listes Trakt. "
-                                f"Relance l'analyse (ci-dessous) pour voir les données à jour."
-                            )
-                            st.rerun()
-
-                    with col_non:
-                        if st.button("❌ Annuler"):
-                            st.session_state["confirmation_suppression"] = False
-                            st.rerun()
-
-        st.divider()
-
-        col_relance_rapide, col_relance_totale = st.columns(2)
-
-        with col_relance_rapide:
-            if st.button("🔄 Relancer l'analyse des listes (rapide)"):
-                st.session_state.pop("message_suppression", None)
-                del st.session_state["resultats"]
-                del st.session_state["stats_listes"]
-                del st.session_state["doublons"]
-                st.rerun()
-
-        with col_relance_totale:
-            if st.button("🔃 Tout rafraîchir, historique inclus (plus long)"):
-                st.session_state.pop("message_suppression", None)
-                del st.session_state["historique"]
-                del st.session_state["resultats"]
-                del st.session_state["stats_listes"]
-                del st.session_state["doublons"]
-                st.rerun()
