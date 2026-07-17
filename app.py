@@ -158,7 +158,7 @@ def obtenir_historique(access_token, barre=None):
     for page in range(1, total_pages + 1):
 
         if barre:
-            barre.progress(page / total_pages * 0.7, text=f"Récupération de l'historique : page {page}/{total_pages}")
+            barre.progress(page / total_pages * 0.6, text=f"Récupération de l'historique : page {page}/{total_pages}")
 
         reponse = requests.get(
             "https://api.trakt.tv/users/me/history",
@@ -336,7 +336,7 @@ def analyser_tout(access_token, historique, barre=None):
             return
 
         trakt_id = media["ids"]["trakt"]
-        cle = (type_affiche, trakt_id)  # type + id : évite qu'un film et une série au même numéro se mélangent
+        cle = (type_affiche, trakt_id)
 
         if cle not in apparitions:
             apparitions[cle] = {
@@ -351,7 +351,7 @@ def analyser_tout(access_token, historique, barre=None):
         apparitions[cle]["vu_dans"].append({"nom_liste": nom_liste, "liste_id": liste_id})
 
     if barre:
-        barre.progress(0.7, text="Analyse de la watchlist...")
+        barre.progress(0.6, text="Analyse de la watchlist...")
 
     watchlist = obtenir_watchlist(access_token)
 
@@ -378,7 +378,7 @@ def analyser_tout(access_token, historique, barre=None):
     for i, liste in enumerate(listes):
 
         if barre:
-            barre.progress(0.7 + (i + 1) / max(len(listes), 1) * 0.3, text=f"Analyse de la liste : {liste['name']}")
+            barre.progress(0.6 + (i + 1) / max(len(listes), 1) * 0.3, text=f"Analyse de la liste : {liste['name']}")
 
         items = obtenir_contenu_liste(access_token, liste["ids"]["trakt"])
 
@@ -426,6 +426,52 @@ def analyser_tout(access_token, historique, barre=None):
     return resultats, stats_listes, doublons, doublons_detail
 
 
+def obtenir_playback(access_token, barre=None):
+    """Récupère les contenus en cours de visionnage non terminés (fantômes potentiels),
+    triés du plus ancien (fantôme probable) au plus récent."""
+
+    if barre:
+        barre.progress(0.95, text="Recherche des visionnages en cours (fantômes)...")
+
+    reponse = requests.get("https://api.trakt.tv/sync/playback", headers=entetes_trakt(access_token))
+    reponse.raise_for_status()
+
+    resultats = []
+
+    for item in reponse.json():
+
+        if item["type"] == "movie" and item.get("movie"):
+            media = item["movie"]
+            titre = media["title"]
+            annee = media.get("year")
+
+        elif item["type"] == "episode" and item.get("show") and item.get("episode"):
+            episode = item["episode"]
+            saison = episode.get("season")
+            numero = episode.get("number")
+            if saison is not None and numero is not None:
+                titre = f"{item['show']['title']} — S{saison:02d}E{numero:02d}"
+            else:
+                titre = item["show"]["title"]
+            annee = item["show"].get("year")
+
+        else:
+            continue
+
+        resultats.append({
+            "type": "Film" if item["type"] == "movie" else "Épisode",
+            "titre": titre,
+            "annee": annee,
+            "progression": round(item.get("progress", 0)),
+            "dernier_visionnage": item["paused_at"],
+            "playback_id": item["id"],
+        })
+
+    resultats.sort(key=lambda x: x["dernier_visionnage"])
+
+    return resultats
+
+
 # ==================================================
 # FONCTIONS TRAKT — SUPPRESSION
 # ==================================================
@@ -449,7 +495,7 @@ def supprimer_de_liste(access_token, liste_id, items_a_supprimer):
 
 
 def supprimer_selection(access_token, items_selectionnes):
-    """Supprime les éléments sélectionnés, liste par liste (un appel par liste concernée)."""
+    """Supprime les éléments sélectionnés d'une liste, liste par liste (un appel par liste concernée)."""
 
     par_liste = {}
     for item in items_selectionnes:
@@ -457,6 +503,18 @@ def supprimer_selection(access_token, items_selectionnes):
 
     for liste_id, items in par_liste.items():
         supprimer_de_liste(access_token, liste_id, items)
+        time.sleep(1)
+
+
+def supprimer_playback(access_token, items_selectionnes):
+    """Supprime les entrées de visionnage en cours sélectionnées (les fantômes)."""
+
+    for item in items_selectionnes:
+        reponse = requests.delete(
+            f"https://api.trakt.tv/sync/playback/{item['playback_id']}",
+            headers=entetes_trakt(access_token),
+        )
+        reponse.raise_for_status()
         time.sleep(1)
 
 
@@ -583,9 +641,16 @@ def generer_excel(pseudo, historique, resultats, stats_listes, doublons):
 # INTERFACE — TABLEAU SÉLECTIONNABLE RÉUTILISABLE
 # ==================================================
 
-def afficher_tableau_selectionnable(items, colonnes, noms_colonnes, cle, access_token):
+def afficher_tableau_selectionnable(items, colonnes, noms_colonnes, cle, fonction_suppression):
     """Affiche un tableau avec cases à cocher + suppression confirmée.
-    'items' est une liste de dicts contenant au moins : type, trakt_id, liste_id."""
+    'fonction_suppression' reçoit la liste des items cochés et s'occupe de les supprimer.
+    Le message de confirmation s'affiche juste au-dessus de CE widget précis."""
+
+    cle_message = f"message_suppression_{cle}"
+
+    if st.session_state.get(cle_message):
+        st.success(st.session_state[cle_message])
+        del st.session_state[cle_message]
 
     tableau = pd.DataFrame(items)
     tableau_affichage = tableau[colonnes].copy()
@@ -617,7 +682,7 @@ def afficher_tableau_selectionnable(items, colonnes, noms_colonnes, cle, access_
             st.rerun()
         return
 
-    st.warning(f"Confirmer la suppression de {nb_selectionnes} élément(s) de tes listes Trakt ? Cette action est irréversible.")
+    st.warning(f"Confirmer la suppression de {nb_selectionnes} élément(s) ? Cette action est irréversible.")
 
     col_oui, col_non = st.columns(2)
 
@@ -627,11 +692,11 @@ def afficher_tableau_selectionnable(items, colonnes, noms_colonnes, cle, access_
             items_a_supprimer = [items[i] for i in indices]
 
             with st.spinner("Suppression en cours..."):
-                supprimer_selection(access_token, items_a_supprimer)
+                fonction_suppression(items_a_supprimer)
 
             st.session_state[cle_confirmation] = False
-            st.session_state["message_suppression"] = (
-                f"{len(items_a_supprimer)} élément(s) supprimé(s) de tes listes Trakt. "
+            st.session_state[cle_message] = (
+                f"{len(items_a_supprimer)} élément(s) supprimé(s). "
                 f"Relance l'analyse (en haut) pour voir les données à jour."
             )
             st.rerun()
@@ -663,7 +728,7 @@ if "access_token" not in st.session_state:
 # ==================================================
 
 try:
-    st.image("trakt-logo.svg", width=150)
+    st.image("trakt-logo.svg", width=60)
 except Exception:
     pass
 
@@ -772,11 +837,13 @@ else:
                 st.session_state["historique"] = obtenir_historique(st.session_state["access_token"], barre)
 
             resultats, stats_listes, doublons, doublons_detail = analyser_tout(st.session_state["access_token"], st.session_state["historique"], barre)
+            playback = obtenir_playback(st.session_state["access_token"], barre)
 
             st.session_state["resultats"] = resultats
             st.session_state["stats_listes"] = stats_listes
             st.session_state["doublons"] = doublons
             st.session_state["doublons_detail"] = doublons_detail
+            st.session_state["playback"] = playback
 
             barre.empty()
             st.rerun()
@@ -788,30 +855,31 @@ else:
         stats_listes = st.session_state["stats_listes"]
         doublons = st.session_state["doublons"]
         doublons_detail = st.session_state["doublons_detail"]
+        playback = st.session_state["playback"]
 
-        if st.session_state.get("message_suppression"):
-            st.success(st.session_state["message_suppression"])
+        excel_bytes = generer_excel(pseudo, historique, resultats, stats_listes, doublons)
 
-        col_relance_rapide, col_relance_totale = st.columns(2)
+        col_relance_rapide, col_relance_totale, col_excel = st.columns(3)
 
         with col_relance_rapide:
             if st.button("🔄 Relancer l'analyse des listes (rapide)"):
-                st.session_state.pop("message_suppression", None)
-                del st.session_state["resultats"]
-                del st.session_state["stats_listes"]
-                del st.session_state["doublons"]
-                del st.session_state["doublons_detail"]
+                for cle in ["resultats", "stats_listes", "doublons", "doublons_detail", "playback"]:
+                    st.session_state.pop(cle, None)
                 st.rerun()
 
         with col_relance_totale:
             if st.button("🔃 Tout rafraîchir, historique inclus (plus long)"):
-                st.session_state.pop("message_suppression", None)
-                del st.session_state["historique"]
-                del st.session_state["resultats"]
-                del st.session_state["stats_listes"]
-                del st.session_state["doublons"]
-                del st.session_state["doublons_detail"]
+                for cle in ["historique", "resultats", "stats_listes", "doublons", "doublons_detail", "playback"]:
+                    st.session_state.pop(cle, None)
                 st.rerun()
+
+        with col_excel:
+            st.download_button(
+                "📥 Télécharger le rapport Excel complet",
+                data=excel_bytes,
+                file_name="trakt_smart_lists_rapport.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
 
         st.divider()
         st.subheader("📊 Statistiques")
@@ -831,20 +899,28 @@ else:
         col6.metric("Déjà vus (tous confondus)", total_deja_vus)
         col7.metric("% potentiellement nettoyable", f"{pourcentage_global}%")
 
-        excel_bytes = generer_excel(pseudo, historique, resultats, stats_listes, doublons)
-        st.download_button(
-            "📥 Télécharger le rapport Excel complet",
-            data=excel_bytes,
-            file_name="trakt_smart_lists_rapport.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        st.divider()
+        st.subheader("🧹 Contenus déjà vus")
 
-        df_stats_listes = pd.DataFrame(stats_listes)
-        df_stats_listes["% nettoyable"] = (
-            df_stats_listes["deja_vus"] / df_stats_listes["total"].replace(0, 1) * 100
-        ).round(1)
+        if not resultats:
+            st.info("Aucun contenu déjà vu trouvé. Tout est propre ! 🎉")
+        else:
+            st.write(f"**{len(resultats)}** contenu(s) déjà vu(s) trouvé(s). Coche ceux à supprimer :")
 
-        st.bar_chart(df_stats_listes.set_index("nom")["% nettoyable"])
+            afficher_tableau_selectionnable(
+                resultats,
+                colonnes=["type", "titre", "annee", "vues", "dernier_visionnage", "liste"],
+                noms_colonnes=["Type", "Titre", "Année", "Vues", "Dernier visionnage", "Liste"],
+                cle="deja_vus",
+                fonction_suppression=lambda items: supprimer_selection(st.session_state["access_token"], items),
+            )
+
+            st.caption("Vue d'ensemble : % de contenu déjà vu par liste (pour repérer laquelle nettoyer en premier).")
+            df_stats_listes = pd.DataFrame(stats_listes)
+            df_stats_listes["% nettoyable"] = (
+                df_stats_listes["deja_vus"] / df_stats_listes["total"].replace(0, 1) * 100
+            ).round(1)
+            st.bar_chart(df_stats_listes.set_index("nom")["% nettoyable"])
 
         st.divider()
         st.subheader("🔁 Doublons entre listes")
@@ -859,21 +935,21 @@ else:
                 colonnes=["type", "titre", "annee", "liste"],
                 noms_colonnes=["Type", "Titre", "Année", "Liste"],
                 cle="doublons",
-                access_token=st.session_state["access_token"],
+                fonction_suppression=lambda items: supprimer_selection(st.session_state["access_token"], items),
             )
 
         st.divider()
-        st.subheader("🧹 Contenus déjà vus")
+        st.subheader("👻 Fantômes (Continue Watching)")
 
-        if not resultats:
-            st.info("Aucun contenu déjà vu trouvé. Tout est propre ! 🎉")
+        if not playback:
+            st.info("Aucun visionnage en cours trouvé.")
         else:
-            st.write(f"**{len(resultats)}** contenu(s) déjà vu(s) trouvé(s). Coche ceux à supprimer :")
+            st.write(f"**{len(playback)}** visionnage(s) en cours, du plus ancien au plus récent. Coche ceux à effacer :")
 
             afficher_tableau_selectionnable(
-                resultats,
-                colonnes=["type", "titre", "annee", "vues", "dernier_visionnage", "liste"],
-                noms_colonnes=["Type", "Titre", "Année", "Vues", "Dernier visionnage", "Liste"],
-                cle="deja_vus",
-                access_token=st.session_state["access_token"],
+                playback,
+                colonnes=["type", "titre", "annee", "progression", "dernier_visionnage"],
+                noms_colonnes=["Type", "Titre", "Année", "Progression (%)", "Dernier visionnage"],
+                cle="fantomes",
+                fonction_suppression=lambda items: supprimer_playback(st.session_state["access_token"], items),
             )
