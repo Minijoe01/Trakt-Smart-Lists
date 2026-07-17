@@ -1,10 +1,11 @@
 [theme]
-# Thème : Aston Martin F1 2026
-primaryColor = "#00665F" # Vert Aston Martin officiel
-backgroundColor = "#0A0F0D" # Noir profond / carbone
-secondaryBackgroundColor = "#151B19" # Gris carbone plus clair
-textColor = "#FFFFFF" # Texte blanc
+# Thème : Aston Martin F1 2026 - Moderne, sobre, vert carbone
+primaryColor = "#008778" # Vert Aston Martin lumineux pour les éléments principaux
+backgroundColor = "#071816" # Fond vert très sombre / carbone Aston, pas noir pur
+secondaryBackgroundColor = "#0F2B28" # Fond des cartes et blocs, vert légèrement plus clair
+textColor = "#F0F7F6" # Blanc légèrement adouci, moins agressif pour les yeux
 font = "sans serif"
+base = "dark"
 
 [server]
 enableCORS = false
