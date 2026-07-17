@@ -1,7 +1,9 @@
-streamlit
+streamlit>=1.35
 requests
 pandas
 openpyxl
 qrcode
 pillow
 streamlit-cookies-controller
+streamlit-echarts
+pytz
