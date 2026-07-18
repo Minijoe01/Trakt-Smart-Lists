@@ -1104,7 +1104,7 @@ def page_stats(utz):
     for df_tmp in [films, eps]:
         if not df_tmp.empty:
             toutes_dates.extend(pd.to_datetime(df_tmp["date"], utc=True).dt.tz_convert(utz).tolist())
-    if periode == "Période personnalisée" et toutes_dates:
+    if periode == "Période personnalisée" and toutes_dates:
         dates_df = pd.DataFrame({"date": toutes_dates})
         dates_df["ma"] = dates_df["date"].dt.strftime("%m-%Y")
         mois_dispo = sorted(dates_df["ma"].unique(), key=lambda x: (int(x.split("-")[1]), int(x.split("-")[0])))
@@ -1128,7 +1128,7 @@ def page_stats(utz):
     df = pd.concat(dfs, ignore_index=True)
     mt = datetime.now(utz)
 
-    if periode == "Période personnalisée" et toutes_dates:
+    if periode == "Période personnalisée" and toutes_dates:
         d_deb = datetime.strptime(periode_mois[0], "%m-%Y").replace(tzinfo=utz)
         d_fin = datetime.strptime(periode_mois[1], "%m-%Y").replace(day=28) + timedelta(days=4)
         d_fin = d_fin.replace(tzinfo=utz)
@@ -1159,7 +1159,7 @@ def page_stats(utz):
     if tc in ["Tous","Séries"] and not eps.empty:
         ej = eps.copy()
         ej["date_dt"] = pd.to_datetime(ej["date"], utc=True).dt.tz_convert(utz)
-        if periode == "Période personnalisée" et toutes_dates:
+        if periode == "Période personnalisée" and toutes_dates:
             ej = ej[(ej["date_dt"] >= d_deb) & (ej["date_dt"] <= d_fin)]
         else:
             ej = appliquer_filtres_periode(ej, mt, periode)
@@ -1180,7 +1180,7 @@ def page_stats(utz):
     if tc in ["Tous","Séries"] and not eps.empty:
         ep_n = eps.copy()
         ep_n["date_dt"] = pd.to_datetime(ep_n["date"], utc=True).dt.tz_convert(utz)
-        if periode == "Période personnalisée" et toutes_dates:
+        if periode == "Période personnalisée" and toutes_dates:
             ep_n = ep_n[(ep_n["date_dt"] >= d_deb) & (ep_n["date_dt"] <= d_fin)]
         else:
             ep_n = appliquer_filtres_periode(ep_n, mt, periode)
