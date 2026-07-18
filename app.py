@@ -261,30 +261,28 @@ st.markdown("""
     div[data-testid="stMetric"],
     div.stAlert,
     div[data-testid="stContainer"],
-    div.stButton > button,
-    div[data-baseweb="select"] > div,
-    div[data-baseweb="input"] > div,
     div[data-testid="stDataFrame"],
     div[data-testid="stSlider"] > div,
-    div[data-testid="stSelectSlider"] > div,
-    div[data-testid="stDownloadButton"] > button {
+    div[data-testid="stSelectSlider"] > div {
         background-color: var(--am-bg-card) !important;
         backdrop-filter: blur(14px) !important;
         -webkit-backdrop-filter: blur(14px) !important;
         border-radius: 16px !important;
         border: 1px solid var(--am-border) !important;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.35) !important;
+        box-shadow: none !important;
     }
     /* Contraste supplementaire pour les selects/inputs pour qu'ils ne se fondent pas dans le fond */
     div[data-baseweb="select"] > div,
     div[data-baseweb="input"] > div {
-        background: rgba(3, 30, 27, 0.88) !important;
-        border: 1px solid rgba(0,163,146,0.45) !important;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
+        background: rgba(5, 38, 34, 0.75) !important;
+        border: 1px solid rgba(0,163,146,0.3) !important;
+        box-shadow: none !important;
+        color: var(--am-text) !important;
     }
     div[data-baseweb="select"] > div:hover,
     div[data-baseweb="input"] > div:hover {
-        border-color: var(--am-green) !important;
+        background: rgba(8, 55, 50, 0.85) !important;
+        border-color: rgba(0,163,146,0.5) !important;
     }
 
     /* (Les styles des alertes sont definis plus haut, avec le warning #00D084) */
@@ -338,9 +336,12 @@ st.markdown("""
         border: 1px solid rgba(0,163,146,0.3) !important;
         box-shadow: none !important;
         opacity: 1 !important;
+        padding: 0.75em 1.3em !important;
+        border-radius: 16px !important;
+        margin: 0 !important;
     }
 
-    /* ANTI-OMBRE : forcer l'absence d'ombre sur TOUS les boutons, inputs, selects */
+    /* Pas d'ombres nulle part */
     div.stButton > button,
     div.stButton > button:hover,
     div.stButton > button:active,
@@ -941,21 +942,37 @@ def entete():
         stats = st.session_state["stats"]
         doub = st.session_state["doub"]
         pb = st.session_state["pb"]
-        xl = generer_excel(pseudo, h, res, stats, doub, pb, utz, at=st.session_state["access_token"])
         c1,c2,c3 = st.columns(3)
         with c1:
             if st.button("🔄 Analyse rapide", use_container_width=True):
-                for k in ["res","stats","doub","doub_det","pb","np"]:
+                for k in ["res","stats","doub","doub_det","pb","np","_xl_cache"]:
                     st.session_state.pop(k, None)
                 lancer_analyse(False, st.session_state["page_active"])
         with c2:
             if st.button("🔃 Rafraîchir tout", use_container_width=True):
-                for k in ["historique","res","stats","doub","doub_det","pb","np","infos"]:
+                for k in ["historique","res","stats","doub","doub_det","pb","np","infos","_xl_cache"]:
                     st.session_state.pop(k, None)
                 st.rerun()
         with c3:
-            st.download_button("📥 Rapport Excel", data=xl, file_name=f"trakt_{pseudo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="secondary")
-    st.markdown("<hr style='margin:0.4rem 0 1rem 0; border-color: rgba(18,90,84,0.4);'/>", unsafe_allow_html=True)
+            # Generation PARESSEUSE : excel n'est genere QU'AU CLIC sur le bouton, pas a chaque rendu
+            if st.button("📥 Rapport Excel", use_container_width=True):
+                st.session_state["_xl_genere"] = True
+
+        if st.session_state.get("_xl_genere"):
+            # Cle de cache pour ne pas regenerer si les donnees n'ont pas change
+            cle_cache = (len(res), len(stats), len(doub), len(pb), h.get("nb_ep",0))
+            if st.session_state.get("_xl_cache_cle") != cle_cache:
+                with st.spinner("Génération du rapport Excel..."):
+                    st.session_state["_xl_data"] = generer_excel(pseudo, h, res, stats, doub, pb, utz, at=st.session_state["access_token"])
+                st.session_state["_xl_cache_cle"] = cle_cache
+            st.download_button(
+                "💾 Télécharger le fichier",
+                data=st.session_state["_xl_data"],
+                file_name=f"trakt_{pseudo}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        st.markdown("<hr style='margin:0.4rem 0 1rem 0; border-color: rgba(18,90,84,0.4);'/>", unsafe_allow_html=True)
     return utz
 
 def bloc_lancement():
@@ -1280,18 +1297,6 @@ def page_fantomes(utz):
         ✅ Aucune progression en cours.
         </div>""", unsafe_allow_html=True)
     else:
-        # Boutons de selection rapide (plus fiables qu'une case a cocher)
-        col_sel, col_vider, _ = st.columns([1,1,3])
-        with col_sel:
-            if st.button("✅ Tout sélectionner", use_container_width=True):
-                for it in pb:
-                    st.session_state[f"c_{it['pid']}"] = True
-                st.rerun()
-        with col_vider:
-            if st.button("❌ Tout décocher", use_container_width=True):
-                for it in pb:
-                    st.session_state[f"c_{it['pid']}"] = False
-                st.rerun()
         sels = {}
         for it in pb:
             p = it["prog"]
@@ -2301,20 +2306,16 @@ def page_wrapped():
     st.divider()
     st.markdown(f"### 📊 Heures de visionnage par mois — {annee}")
     h_mois = df_y.groupby("mois_vue")["duree_h"].sum().reindex(range(1,13), fill_value=0).round(1)
-    opt_m = {"title":{"text":f"Heures par mois en {annee}","textStyle":{"color":"#F0FAF8"},"left":"center"},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":nom_mois,"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"bar","itemStyle":{"color":"#CEDC00","borderRadius":[4,4,0,0]}}]}
+    liste_mois = ["Janv.","Fév.","Mars","Avr.","Mai","Juin","Juil.","Août","Sept.","Oct.","Nov.","Déc."]
+    opt_m = {"title":{"text":f"Heures par mois en {annee}","textStyle":{"color":"#F0FAF8"},"left":"center"},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":liste_mois,"axisLabel":{"color":"#9DC5BF","interval":0}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"bar","itemStyle":{"color":"#CEDC00","borderRadius":[4,4,0,0]}}]}
     st_echarts(opt_m, height="350px")
 
 def page_sauvegarde():
     st.subheader("📤 Sauvegarde et restauration")
     st.caption("Exporte toutes tes données (listes, historique, paramètres) dans un fichier JSON que tu peux conserver précieusement, ou restaure-les depuis un fichier précédent.")
+    if bloc_lancement(): return
 
     at = st.session_state["access_token"]
-    if "historique" not in st.session_state:
-        st.markdown("""
-        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:18px; color:#F0FAF8; text-align:center;">
-        ℹ️ Lance d'abord l'analyse depuis le tableau de bord pour pouvoir sauvegarder tes données.
-        </div>""", unsafe_allow_html=True)
-        return
     h = st.session_state["historique"]
     res = st.session_state.get("res", [])
     stats = st.session_state.get("stats", [])
