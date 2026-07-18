@@ -729,22 +729,29 @@ def recuperer_playback(at, barre=None):
     try:
         r = requests.get("https://api.trakt.tv/sync/playback", headers=entetes(at), timeout=15)
         r.raise_for_status()
+        vus = set()  # DEDUPLICATION : eviter les doublons (meme titre, meme progression)
         for it in r.json():
             try:
                 if it["type"] == "movie" and it.get("movie"):
-                    t = it["movie"]["title"]
-                    a = it["movie"].get("year")
+                    m = it["movie"]
+                    t = m["title"]
+                    a = m.get("year")
                     ty = "Film"
-                    duree = it["movie"].get("runtime",0) or 0
-                    tmdb = it["movie"]["ids"].get("tmdb")
+                    duree = m.get("runtime",0) or 0
+                    tmdb = m["ids"].get("tmdb")
+                    cle = ("m", m["ids"].get("trakt", t))
                 elif it["type"] == "episode" and it.get("show") and it.get("episode"):
                     ep = it["episode"]
-                    t = f"{it['show']['title']} — S{ep['season']:02d}E{ep['number']:02d}"
-                    a = it["show"].get("year")
+                    sh = it["show"]
+                    t = f"{sh['title']} — S{ep['season']:02d}E{ep['number']:02d}"
+                    a = sh.get("year")
                     ty = "Épisode"
-                    duree = ep.get("runtime",0) or it["show"].get("runtime",0) or 0
-                    tmdb = it["show"]["ids"].get("tmdb")
+                    duree = ep.get("runtime",0) or sh.get("runtime",0) or 0
+                    tmdb = sh["ids"].get("tmdb")
+                    cle = ("e", sh["ids"].get("trakt", t), ep.get("season",0), ep.get("number",0))
                 else: continue
+                if cle in vus: continue  # skip doublon
+                vus.add(cle)
                 prog = round(it.get("progress",0) or 0)
                 res.append({"type":ty,"titre":t,"annee":a,"prog":prog,"dernier":it["paused_at"],"pid":it["id"],"duree":duree,"tmdb":tmdb})
             except Exception:
@@ -1008,13 +1015,13 @@ def entete():
         with c1:
             if st.button("🔄 Analyse rapide", use_container_width=True):
                 for k in ["res","stats","doub","doub_det","pb","np","_xl_cache",
-                          "_cal_items","_cal_last_key"]:
+                          "_cal_items","_cal_last_key","_qr_resultats","_qr_last_key"]:
                     st.session_state.pop(k, None)
                 lancer_analyse(False, st.session_state["page_active"])
         with c2:
             if st.button("🔃 Rafraîchir tout", use_container_width=True):
                 for k in ["historique","res","stats","doub","doub_det","pb","np","infos","_xl_cache",
-                          "_cal_items","_cal_last_key","_img_cache"]:
+                          "_cal_items","_cal_last_key","_img_cache","_qr_resultats","_qr_last_key"]:
                     st.session_state.pop(k, None)
                 st.rerun()
         with c3:
@@ -2342,7 +2349,6 @@ def page_quoi_regarder(utz):
     h = st.session_state["historique"]
     profil = construire_profil(h, utz)
 
-    # Construire la liste des listes disponibles
     listes_dispo = [("🌟 Toutes les listes confondues", "__ALL__"),
                     ("👀 Liste de suivi", "watchlist")]
     for s in st.session_state["stats"]:
@@ -2351,55 +2357,77 @@ def page_quoi_regarder(utz):
 
     col_l, col_t = st.columns([1,1])
     with col_l:
-        choix_label = st.selectbox("📋 Liste à explorer", [l[0] for l in listes_dispo])
+        choix_label = st.selectbox("📋 Liste à explorer", [l[0] for l in listes_dispo], key="qr_liste")
     with col_t:
-        type_f = st.selectbox("🎞️ Type de contenu", ["Tous", "Films seulement", "Séries seulement"])
+        type_f = st.selectbox("🎞️ Type de contenu", ["Tous", "Films seulement", "Séries seulement"], key="qr_type")
     lid_nom = dict(listes_dispo)[choix_label]
 
-    # Recuperer les items
     at = st.session_state["access_token"]
-    with st.spinner("Analyse intelligente de la liste..."):
-        if lid_nom == "watchlist":
-            items = recuperer_watchlist(at)
-        elif lid_nom == "__ALL__":
-            items = recuperer_watchlist(at)
+
+    # CACHE : ne re-score PAS les items a chaque changement de filtre,
+    # seulement quand on change de liste selectionnee (comme le calendrier)
+    cache_key_qr = ("qr_resultats", lid_nom)
+    if st.session_state.get("_qr_last_key") != cache_key_qr:
+        with st.spinner("Analyse intelligente de la liste..."):
             try:
-                for l in recuperer_listes(at):
+                if lid_nom == "watchlist":
+                    items = recuperer_watchlist(at)
+                elif lid_nom == "__ALL__":
+                    items = recuperer_watchlist(at)
                     try:
-                        items.extend(recuperer_contenu_liste(at, l["ids"]["trakt"]))
+                        for l in recuperer_listes(at):
+                            try:
+                                items.extend(recuperer_contenu_liste(at, l["ids"]["trakt"]))
+                            except Exception:
+                                continue
                     except Exception:
                         pass
-            except Exception:
-                pass
-        else:
-            l_id = None
-            for l in recuperer_listes(at):
-                if l["name"] == lid_nom:
-                    l_id = l["ids"]["trakt"]; break
-            if not l_id:
-                st.markdown("""
-                <div style="background: rgba(237,34,36,0.12); border:1px solid rgba(237,34,36,0.35); border-radius:12px; padding:12px; color:#F0FAF8;">
-                ❌ Liste introuvable.
-                </div>""", unsafe_allow_html=True)
-                return
-            items = recuperer_contenu_liste(at, l_id)
+                else:
+                    l_id = None
+                    try:
+                        for l in recuperer_listes(at):
+                            if l["name"] == lid_nom:
+                                l_id = l["ids"]["trakt"]; break
+                    except Exception:
+                        pass
+                    if not l_id:
+                        st.markdown("""
+                        <div style="background: rgba(237,34,36,0.12); border:1px solid rgba(237,34,36,0.35); border-radius:12px; padding:12px; color:#F0FAF8;">
+                        ❌ Liste introuvable.
+                        </div>""", unsafe_allow_html=True)
+                        st.session_state["_qr_resultats"] = []
+                        st.session_state["_qr_last_key"] = cache_key_qr
+                        items = []
+                    else:
+                        items = recuperer_contenu_liste(at, l_id)
 
-        deja_vus_tids = set()
-        for r in st.session_state["res"]:
-            if not r.get("ajoute_apres", False):
-                deja_vus_tids.add((r["type"], r["tid"]))
+                deja_vus_tids = set()
+                for r in st.session_state.get("res", []):
+                    if not r.get("ajoute_apres", False):
+                        deja_vus_tids.add((r["type"], r["tid"]))
 
-        mt = datetime.now(utz)
-        resultats = []
-        for it in items:
-            ev = evaluer_contenu(it, profil, mt)
-            if not ev: continue
-            cle_type = ev["type"]
-            cle_tid = it["movie"]["ids"]["trakt"] if it["type"]=="movie" else it["show"]["ids"]["trakt"]
-            if (cle_type, cle_tid) in deja_vus_tids:
-                continue
-            ev["_raw"] = it
-            resultats.append(ev)
+                mt = datetime.now(utz)
+                resultats = []
+                for it in items:
+                    try:
+                        ev = evaluer_contenu(it, profil, mt)
+                        if not ev: continue
+                        cle_type = ev["type"]
+                        cle_tid = it["movie"]["ids"]["trakt"] if it["type"]=="movie" else it["show"]["ids"]["trakt"]
+                        if (cle_type, cle_tid) in deja_vus_tids:
+                            continue
+                        # Ne pas stocker _raw qui est gros, on a juste besoin de tmdb_id pour les posters
+                        ev["tmdb"] = ev.get("tmdb")
+                        resultats.append(ev)
+                    except Exception:
+                        continue
+                st.session_state["_qr_resultats"] = resultats
+                st.session_state["_qr_last_key"] = cache_key_qr
+            except Exception as e:
+                st.error(f"Erreur pendant l'analyse : {e}")
+                st.session_state["_qr_resultats"] = []
+                st.session_state["_qr_last_key"] = cache_key_qr
+    resultats = st.session_state.get("_qr_resultats", [])
 
     if not resultats:
         st.markdown("""
@@ -2524,12 +2552,20 @@ def page_quoi_regarder(utz):
         st.divider()
         st.markdown(f"### {nom_titre} ({len(groupe)})")
         for r in groupe:
-            img = image_tmdb(r.get("tmdb"), "movie" if r["type"]=="Film" else "tv")
             with st.container(border=True):
                 cimg, cmain, cscore = st.columns([0.08, 0.77, 0.15])
                 with cimg:
-                    if img:
-                        st.image(img, use_container_width=True)
+                    # Chargement paresseux des posters : UNIQUEMENT au moment de l'affichage
+                    tmdb_id = r.get("tmdb")
+                    if tmdb_id:
+                        try:
+                            img_url = image_tmdb(tmdb_id, "movie" if r["type"]=="Film" else "tv")
+                            if img_url:
+                                st.image(img_url, use_container_width=True)
+                            else:
+                                st.markdown("🎬" if r["type"]=="Film" else "📺")
+                        except Exception:
+                            st.markdown("🎬" if r["type"]=="Film" else "📺")
                     else:
                         st.markdown("🎬" if r["type"]=="Film" else "📺")
                 with cmain:
