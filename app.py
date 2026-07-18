@@ -176,17 +176,27 @@ st.markdown("""
         box-shadow: 0 8px 32px rgba(0,0,0,0.22) !important;
     }
 
-    /* Messages connexion : assorti au theme, plus de bleu */
+    /* Messages connexion : palette ASTON COHERENTE, plus de bleu/olif qui jurent */
     div.stInfo {
-        background: var(--am-bg-card) !important;
+        background: linear-gradient(135deg, rgba(0,102,95,0.45) 0%, rgba(0,70,65,0.55) 100%) !important;
         border-left: 4px solid var(--am-green) !important;
-        border: 1px solid var(--am-border) !important;
+        border: 1px solid rgba(0,163,146,0.35) !important;
         color: var(--am-text) !important;
     }
     div.stInfo svg { fill: var(--am-green) !important; }
-    div.stSuccess { background: rgba(0,163,146,0.15) !important; border-left: 4px solid var(--am-green) !important; border: 1px solid rgba(0,163,146,0.3) !important; color: var(--am-text) !important; }
+    div.stSuccess {
+        background: linear-gradient(135deg, rgba(0,163,146,0.18) 0%, rgba(0,82,75,0.32) 100%) !important;
+        border-left: 4px solid var(--am-green) !important;
+        border: 1px solid rgba(0,163,146,0.4) !important;
+        color: var(--am-text) !important;
+    }
     div.stSuccess svg { fill: var(--am-green) !important; }
-    div.stWarning { background: rgba(206,220,0,0.1) !important; border-left: 4px solid var(--am-lime) !important; border: 1px solid rgba(206,220,0,0.3) !important; color: var(--am-text) !important; }
+    div.stWarning {
+        background: linear-gradient(135deg, rgba(206,220,0,0.10) 0%, rgba(120,130,0,0.18) 100%) !important;
+        border-left: 4px solid var(--am-lime) !important;
+        border: 1px solid rgba(206,220,0,0.35) !important;
+        color: var(--am-text) !important;
+    }
     div.stWarning svg { fill: var(--am-lime) !important; }
     div.stError { background: rgba(237,34,36,0.1) !important; border-left: 4px solid #ED2224 !important; border: 1px solid rgba(237,34,36,0.3) !important; }
 
@@ -684,6 +694,7 @@ def naviguer():
         "👻 Progression Fantôme",
         "🧹 Nettoyage des listes",
         "🔍 Recherche de doublons",
+        "🎯 Que regarder ?",
         "📊 Statistiques",
         "📅 Calendrier des sorties",
         "🎬 Rendez-vous annuel",
@@ -1147,10 +1158,35 @@ def page_succes(utz):
     # Series avec au moins 10 episodes vus
     series_10ep = 0
     series_50ep = 0
+    series_100ep = 0
+    series_200ep = 0
+    nb_jours_diff = 0
+    note_coup_coeur = False
+    nuit_blanche = False
     if not eps_df.empty:
         par_serie = eps_df.groupby("serie").size()
         series_10ep = int((par_serie >= 10).sum())
         series_50ep = int((par_serie >= 50).sum())
+        series_100ep = int((par_serie >= 100).sum())
+        series_200ep = int((par_serie >= 200).sum())
+    # Jours differents de visionnage
+    toutes_dt = []
+    if not films_df.empty:
+        toutes_dt.extend(pd.to_datetime(films_df["date"], utc=True).dt.tz_convert(utz).tolist())
+    if not eps_df.empty:
+        toutes_dt.extend(pd.to_datetime(eps_df["date"], utc=True).dt.tz_convert(utz).tolist())
+    if toutes_dt:
+        s_dt = pd.Series(toutes_dt)
+        nb_jours_diff = s_dt.dt.date.nunique()
+        # Nuit blanche : plus de 6h entre 0h et 6h sur une meme date (nuit)
+        dn = s_dt[(s_dt.dt.hour >= 0) & (s_dt.dt.hour < 6)]
+        if not dn.empty:
+            nuit_blanche = bool((dn.groupby([dn.dt.date]).count() >= 3).any())  # au moins 3 contenus dans une nuit
+        # Coup de coeur : note >= 9
+        if not films_df.empty and (films_df["note"] >= 9).any():
+            note_coup_coeur = True
+        if not eps_df.empty and (eps_df["note"] >= 9).any():
+            note_coup_coeur = True
 
     # Liste complete des badges : (id, emoji, titre, desc, condition bool, progression pct pour les lock)
     badges = [
@@ -1162,6 +1198,8 @@ def page_succes(utz):
         ("h720",  "🗓️", "Un mois de binge",     "30 jours complets de visionnage (720h)",                              total_h >= 720,      min(total_h/720*100,100)),
         ("h2160", "🏁", "Trimestre sur écran",  "3 mois entiers à regarder des contenus (2160h)",                      total_h >= 2160,     min(total_h/2160*100,100)),
         ("h8760", "👑", "Une année d'écran",    "1 AN de visionnage cumulé (8760h) — statut de légende",               total_h >= 8760,     min(total_h/8760*100,100)),
+        ("h26k",  "⚜️", "Empereur du canapé",    "3 ANS de visionnage — tu vis sur Trakt (26 280h)",                    total_h >= 26280,    min(total_h/26280*100,100)),
+        ("h43k",  "🧙", "Archiviste ultime",     "5 ANS entiers de visionnage — tu as vu presque tout (43 800h)",       total_h >= 43800,    min(total_h/43800*100,100)),
 
         # -- Films --
         ("f1",    "🎬", "Premier film",         "Ton premier film vu",                                                 total_films >= 1,    min(total_films/1*100,100)),
@@ -1171,6 +1209,8 @@ def page_succes(utz):
         ("f250",  "🏅", "Amoureux du 7ème art", "250 films vus — une belle cinémathèque",                              total_films >= 250,  min(total_films/250*100,100)),
         ("f500",  "🎭", "Véritable cinéphile",  "500 films différents vus",                                            total_films >= 500,  min(total_films/500*100,100)),
         ("f1000", "🎪", "Maître du grand écran","1000 films, impressionnant !",                                        total_films >= 1000, min(total_films/1000*100,100)),
+        ("f2000", "🏛️", "Bibliothèque vivante", "2000 films — ta culture ciné est immense",                            total_films >= 2000, min(total_films/2000*100,100)),
+        ("f5000", "🧠", "Encyclopédie du cinéma","5000 films différents — tu devrais écrire un blog",                   total_films >= 5000, min(total_films/5000*100,100)),
 
         # -- Series --
         ("s1",    "📺", "Premier épisode",      "Ton tout premier épisode vu",                                         total_eps >= 1,      min(total_eps/1*100,100)),
@@ -1180,26 +1220,36 @@ def page_succes(utz):
         ("s1000", "🔥", "Mille épisodes",       "1000 épisodes ! Une belle performance",                               total_eps >= 1000,   min(total_eps/1000*100,100)),
         ("s2500", "🚀", "Marathonien TV",       "2500 épisodes — tu vis littéralement devant les séries",              total_eps >= 2500,   min(total_eps/2500*100,100)),
         ("s5000", "🏯", "Forteresse de canapé", "5000 épisodes — rien ne t'arrête",                                    total_eps >= 5000,   min(total_eps/5000*100,100)),
+        ("s10k",  "🌋", "Dix mille épisodes",   "10 000 épisodes. Juste... wow.",                                      total_eps >= 10000,  min(total_eps/10000*100,100)),
+        ("s25k",  "🌌", "Univers télévisuel",   "25 000 épisodes — tu as plus vu de séries que la plupart des gens",   total_eps >= 25000,  min(total_eps/25000*100,100)),
 
         # -- Series suivies --
         ("sv1",   "✅", "Une série terminée",   "Au moins 10 épisodes vus d'une même série",                           series_10ep >= 1,    min(series_10ep/1*100,100)),
         ("sv5",   "💪", "Cinq séries suivies",  "Tu as vu 10+ épisodes de 5 séries différentes",                       series_10ep >= 5,    min(series_10ep/5*100,100)),
         ("sv10",  "📚", "Dix séries suivies",   "10 séries dont tu as vu plus de 10 épisodes",                         series_10ep >= 10,   min(series_10ep/10*100,100)),
+        ("sv25",  "🗂️", "Collectionneur",      "25 séries différentes avec 10+ épisodes chacune",                     series_10ep >= 25,   min(series_10ep/25*100,100)),
         ("sv50",  "💎", "Fan inconditionnel",   "Une série avec plus de 50 épisodes vus",                              series_50ep >= 1,    min(series_50ep/1*100,100)),
+        ("sv100", "💍", "Relation sérieuse",    "Une série avec plus de 100 épisodes vus — un investissement",         series_100ep >= 1,   min(series_100ep/1*100,100)),
+        ("sv200", "👑", "Série culte",          "Une série avec plus de 200 épisodes — un compagnon de vie",           series_200ep >= 1,   min(series_200ep/1*100,100)),
 
         # -- Marathons --
         ("mar4",  "🏃", "Marathonien",          "4+ épisodes d'une même série en 1 jour",                              rec_jour >= 4,       min(rec_jour/4*100,100)),
         ("mar8",  "⚡", "Marathon éclair",      "8+ épisodes en une seule journée",                                    rec_jour >= 8,       min(rec_jour/8*100,100)),
         ("mar12", "🚄", "Train fou",            "12+ épisodes en 1 jour — ça c'est du binge !",                        rec_jour >= 12,      min(rec_jour/12*100,100)),
+        ("mar20", "🏁", "Journée sans sortir",  "20+ épisodes en 1 jour — tu n'as pas vu le soleil",                   rec_jour >= 20,      min(rec_jour/20*100,100)),
 
         # -- Diversite --
         ("divg",  "🌈", "Explorateur de genres","Tu as touché à au moins 10 genres différents",                        nb_genres >= 10,     min(nb_genres/10*100,100)),
+        ("divg2", "🎨", "Palette complète",     "20 genres différents explorés",                                       nb_genres >= 20,     min(nb_genres/20*100,100)),
         ("diva",  "🕰️", "Voyageur temporel",    "Tu as vu des contenus de 20 années de sortie différentes",            nb_annees >= 20,     min(nb_annees/20*100,100)),
         ("diva3", "🗿", "Amateur de classiques","Des contenus de 40 années différentes — du vieux au neuf !",          nb_annees >= 40,     min(nb_annees/40*100,100)),
+        ("diva6", "🏛️", "Passé et présent",     "60 années de cinéma/séries — des années 60 à aujourd'hui",            nb_annees >= 60,     min(nb_annees/60*100,100)),
 
         # -- Nocturne --
         ("nuit",  "🌙", "Oiseau de nuit",       "Plus de 20 visionnages entre minuit et 5h du matin",                  vues_nuit >= 20,     min(vues_nuit/20*100,100)),
         ("nuit2", "🦉", "Chouette cinéphile",   "Plus de 100 visionnages nocturnes",                                   vues_nuit >= 100,    min(vues_nuit/100*100,100)),
+        ("nuit3", "🦇", "Créature de la nuit",  "Plus de 500 visionnages entre minuit et 5h",                          vues_nuit >= 500,    min(vues_nuit/500*100,100)),
+        ("nuitb", "🌃", "Nuit blanche",         "Plus de 3 visionnages entre minuit et 6h sur une même nuit",           nuit_blanche,       100 if nuit_blanche else 0),
 
         # -- Global --
         ("all1",  "👶", "Nouveau venu",         "Ton tout premier visionnage sur Trakt",                               total_vues >= 1,     min(total_vues/1*100,100)),
@@ -1207,6 +1257,13 @@ def page_succes(utz):
         ("all1k", "🌟", "Mille visionnages",    "1000 visionnages, belle courbe de progression !",                     total_vues >= 1000,  min(total_vues/1000*100,100)),
         ("all5k", "💫", "Cinq mille",           "5000 visionnages, une véritable habitude",                            total_vues >= 5000,  min(total_vues/5000*100,100)),
         ("all10k","🪽", "Dix mille",            "10 000 visionnages — c'est de la passion à ce niveau",                total_vues >= 10000, min(total_vues/10000*100,100)),
+        ("all25k","🔱", "25 000",               "25 000 visionnages, tu es un abonné historique",                      total_vues >= 25000, min(total_vues/25000*100,100)),
+        ("all50k","🌠", "50 000",               "50 000 visionnages, la légende est en marche",                        total_vues >= 50000, min(total_vues/50000*100,100)),
+
+        # -- Rythme --
+        ("ryth",  "📆", "Un an de fidélité",    "Visionnages répartis sur au moins 365 jours différents",              nb_jours_diff >= 365, min(nb_jours_diff/365*100,100)),
+        ("ryth2", "🗓️", "Deux ans de fidélité", "Contenus vus sur plus de 730 jours différents",                       nb_jours_diff >= 730, min(nb_jours_diff/730*100,100)),
+        ("note9", "💯", "Critique exigeant",    "Au moins un contenu noté 9 ou 10 — tu as eu un coup de cœur",        note_coup_coeur,    100 if note_coup_coeur else 0),
     ]
 
     obtenus = [b for b in badges if b[4]]
@@ -1418,6 +1475,343 @@ def page_stats(utz):
         df_aff.columns = ["Date","Type","Titre","Année","Genres","Durée","Note"]
         st.dataframe(df_aff, use_container_width=True, hide_index=True)
 
+def construire_profil(histo, utz):
+    """Construit un profil de gouts depuis l'historique : genres preferes, reseaux, notes."""
+    films = pd.DataFrame(histo["films_det"])
+    eps = pd.DataFrame(histo["ep_det"])
+    genres_score = {}
+    reseaux_score = {}
+    decennies_score = {}
+    notes_par_genre = {}
+    total_duree = 0.0
+    # Films
+    if not films.empty:
+        for _, r in films.iterrows():
+            d = r.get("duree", 0) or 0
+            if not d: d = 100
+            total_duree += d
+            note = r.get("note", 0) or 0
+            for g in str(r.get("genre","")).split(", "):
+                if g and g != "Inconnu":
+                    genres_score[g] = genres_score.get(g,0) + d
+                    if note > 0:
+                        notes_par_genre[g] = notes_par_genre.get(g, []); notes_par_genre[g].append(note)
+            try:
+                an = int(r.get("annee")) if r.get("annee") else None
+                if an:
+                    dec = (an//10)*10
+                    decennies_score[dec] = decennies_score.get(dec,0) + d
+            except: pass
+    # Series
+    if not eps.empty:
+        for _, r in eps.iterrows():
+            d = r.get("duree", 0) or 0
+            if not d: d = 40
+            total_duree += d
+            note = r.get("note", 0) or 0
+            for g in str(r.get("genre","")).split(", "):
+                if g and g != "Inconnu":
+                    genres_score[g] = genres_score.get(g,0) + d
+                    if note > 0:
+                        notes_par_genre[g] = notes_par_genre.get(g, []); notes_par_genre[g].append(note)
+            net = r.get("network")
+            if net and net != "Inconnu":
+                reseaux_score[net] = reseaux_score.get(net,0) + d
+            try:
+                an = int(r.get("annee")) if r.get("annee") else None
+                if an:
+                    dec = (an//10)*10
+                    decennies_score[dec] = decennies_score.get(dec,0) + d
+            except: pass
+    # Normaliser
+    def normaliser(d):
+        if not d: return {}
+        m = max(d.values()) if d else 1
+        return {k: v/m*100 for k,v in d.items()}
+    note_moy_genre = {k: sum(v)/len(v) for k,v in notes_par_genre.items() if v}
+    return {
+        "genres": normaliser(genres_score),
+        "reseaux": normaliser(reseaux_score),
+        "decennies": normaliser(decennies_score),
+        "note_genre": note_moy_genre,
+        "total_h": total_duree/60,
+        "date_plus_recent": pd.Timestamp.now(tz=utz)
+    }
+
+def evaluer_contenu(item, profil, maintenant_tz):
+    """
+    Retourne un score 0-100 de recommandation, et un flag d'alerte (deconseille).
+    item = un element d'une liste/watchlist (format Trakt)
+    """
+    if item["type"] == "movie":
+        med = item["movie"]
+        duree = (med.get("runtime") or 0)
+        genres = med.get("genres") or []
+        annee = med.get("year")
+        note = med.get("rating") or 0
+        titre = med.get("title","")
+    elif item["type"] == "show":
+        med = item["show"]
+        # Pour une serie, on estime la duree totale par nombre de saisons/episodes
+        # Comme on n'a pas ces infos sans appel sup, on estime a runtime par defaut * nb episodes moyen
+        ep_dur = med.get("runtime") or 40
+        nb_aired = med.get("aired_episodes") or 0
+        if nb_aired > 0:
+            duree = ep_dur * nb_aired
+        else:
+            # Estimation grossiere si pas de donnee
+            duree = ep_dur * 50
+        genres = med.get("genres") or []
+        annee = med.get("year")
+        note = med.get("rating") or 0
+        titre = med.get("title","")
+    else:
+        return None
+
+    # Score de recommandation (0-100)
+    score = 0.0
+    raisons = []
+    points_noirs = []
+
+    # 1. Correspondance avec les genres preferes (40 points max)
+    if genres:
+        g_match = sum(profil["genres"].get(g,0) for g in genres) / max(len(genres),1)
+        score += min(g_match * 0.4, 40)
+        if any(profil["genres"].get(g,0) > 60 for g in genres):
+            raisons.append("Genre que tu adores")
+        elif all(profil["genres"].get(g,0) < 10 for g in genres):
+            points_noirs.append("Genre que tu regardes rarement")
+
+    # 2. Note moyenne du contenu (25 points max)
+    if note > 0:
+        score += min((note/10)*25, 25)
+        if note >= 8.0:
+            raisons.append(f"Très bien noté ({note:.1f}/10)")
+        elif note < 5.0:
+            points_noirs.append(f"Note faible ({note:.1f}/10)")
+
+    # 3. Recence de la sortie (15 points max) : on favorise les sorties recentes que tu
+    #    as probablement ajoutees expres SAUF si ton profil est tourne vers les classiques
+    if annee:
+        age = maintenant_tz.year - annee
+        if age <= 2:
+            score += 15
+            raisons.append("Sortie récente")
+        elif age <= 10:
+            score += 8
+        elif age > 30:
+            # Points bonus si tu regardes beaucoup de vieux, sinon negatif
+            if profil["decennies"].get((annee//10)*10,0) > 50:
+                score += 10
+                raisons.append("Un classique qui correspond à tes goûts")
+            else:
+                score += 2
+
+    # 4. Duree necessaire (10 points) : on favorise les contenus rapides a regarder
+    #    si tu n'as pas beaucoup de temps, films plutot que series longues
+    if item["type"] == "movie":
+        if duree and duree <= 100:
+            score += 10
+            raisons.append("Film rapide (< 1h40)")
+        elif duree and duree <= 140:
+            score += 6
+    else:
+        # Serie : plus il y a d'episodes, plus c'est un engagement
+        ep_dur = med.get("runtime") or 40
+        nb_aired = med.get("aired_episodes") or 0
+        if nb_aired <= 6:
+            score += 8
+            raisons.append("Mini-série rapide à finir")
+        elif nb_aired <= 25:
+            score += 5
+            raisons.append("Série courte")
+        elif nb_aired >= 200:
+            score -= 5
+            points_noirs.append(f"Gros engagement ({nb_aired} épisodes)")
+
+    # 5. Ajoute recemment dans la liste (10 points max)
+    listed_at = item.get("_listed_at")
+    anciennete_jours = None
+    if listed_at:
+        try:
+            dt_l = pd.to_datetime(listed_at, utc=True).tz_convert(maintenant_tz.tzinfo)
+            delta = maintenant_tz - dt_l.to_pydatetime()
+            anciennete_jours = delta.days
+            if anciennete_jours <= 14:
+                score += 10
+            elif anciennete_jours > 365:
+                score -= 20
+                points_noirs.append(f"Ajouté il y a plus d'un an, tu as probablement oublié")
+            elif anciennete_jours > 180:
+                score -= 10
+                points_noirs.append("Ajouté il y a longtemps")
+        except:
+            pass
+
+    # Contenu deconseille si score bas OU points noirs importants
+    deconseille = (score < 35) or (len(points_noirs) >= 2)
+    if deconseille and score > 35 and len(points_noirs) < 2:
+        deconseille = False
+
+    # Le temps necessaire en format lisible
+    if item["type"] == "movie":
+        temps_necessaire = format_minutes(duree) if duree else "inconnu"
+    else:
+        heures = duree/60
+        temps_necessaire = format_duree(heures) if heures > 0 else "inconnu"
+
+    return {
+        "type": "Film" if item["type"]=="movie" else "Série",
+        "titre": titre,
+        "annee": annee,
+        "note": round(note,1) if note else None,
+        "genres": ", ".join(genres) if genres else "Inconnu",
+        "temps": temps_necessaire,
+        "duree_min": duree,
+        "score": max(0, min(round(score,1), 100)),
+        "raisons": raisons,
+        "averti": points_noirs,
+        "deconseille": deconseille,
+        "tmdb": med["ids"].get("tmdb"),
+        "ajout": anciennete_jours,
+    }
+
+def page_quoi_regarder(utz):
+    if bloc_lancement(): return
+    st.subheader("🎯 Que regarder ?")
+    st.caption("Sélectionne une liste et laisse-moi te recommander le prochain contenu à regarder, selon tes goûts, ton historique et tes notes. Fini le scroll infini !")
+
+    h = st.session_state["historique"]
+    profil = construire_profil(h, utz)
+
+    # Construire la liste des listes disponibles (watchlist + listes custom)
+    listes_dispo = [("👀 Liste de suivi", "watchlist")]
+    for s in st.session_state["stats"]:
+        if s["nom"] != "Liste de suivi":
+            listes_dispo.append((f"📋 {s['nom']}", s["nom"]))
+
+    choix_label = st.selectbox("Choisis une liste", [l[0] for l in listes_dispo])
+    lid_nom = dict(listes_dispo)[choix_label]
+
+    # Recuperer les items de cette liste
+    at = st.session_state["access_token"]
+    with st.spinner("Analyse intelligente de la liste..."):
+        if lid_nom == "watchlist":
+            items = recuperer_watchlist(at) if "wl_qg" not in st.session_state else st.session_state.wl_qg
+            st.session_state.wl_qg = items
+        else:
+            # Chercher l'id de la liste
+            l_id = None
+            for l in recuperer_listes(at):
+                if l["name"] == lid_nom:
+                    l_id = l["ids"]["trakt"]
+                    break
+            if not l_id:
+                st.warning("Liste introuvable."); return
+            items = recuperer_contenu_liste(at, l_id)
+
+        # Exclure les contenus deja vus (sauf ceux ajoutes apres visionnage pour rewatch)
+        # On va utiliser res pour trouver les deja-vus
+        deja_vus_tids = set()
+        for r in st.session_state["res"]:
+            if not r.get("ajoute_apres", False):
+                deja_vus_tids.add((r["type"], r["tid"]))
+
+        mt = datetime.now(utz)
+        resultats = []
+        for it in items:
+            ev = evaluer_contenu(it, profil, mt)
+            if not ev: continue
+            # Type converti pour correspondre a deja_vus
+            cle = (ev["type"], it[it["type"].lower() if it["type"] != "show" else "show"]["ids"]["trakt"])
+            if cle in deja_vus_tids:
+                continue
+            ev["_raw"] = it
+            resultats.append(ev)
+
+    if not resultats:
+        st.info("Aucun contenu à évaluer dans cette liste.")
+        return
+
+    st.markdown(f"**{len(resultats)}** contenus à évaluer dans cette liste.")
+
+    # Tris
+    tri = st.radio("Trier par", ["✨ Recommandé pour moi", "⭐ Meilleures notes", "⏱️ Plus rapide à regarder", "🆕 Ajouté récemment", "⚠️ Déconseillés"], horizontal=True)
+
+    if tri == "✨ Recommandé pour moi":
+        resultats.sort(key=lambda x: -x["score"])
+        top = [r for r in resultats if r["score"] >= 50 and not r["deconseille"]]
+        bof = [r for r in resultats if 30 <= r["score"] < 50 and not r["deconseille"]]
+        dec = [r for r in resultats if r["deconseille"]]
+        sections = [("✨ Recommandations personnalisées", top, "rec"),
+                    ("🤔 Pourquoi pas", bof, "mid"),
+                    ("⚠️ Déconseillés pour toi", dec, "bad")]
+    elif tri == "⭐ Meilleures notes":
+        resultats.sort(key=lambda x: -(x["note"] or 0))
+        sections = [("⭐ Par note", resultats, "note")]
+    elif tri == "⏱️ Plus rapide à regarder":
+        resultats.sort(key=lambda x: x["duree_min"])
+        sections = [("⏱️ Du plus rapide au plus long", resultats, "rapide")]
+    elif tri == "🆕 Ajouté récemment":
+        resultats.sort(key=lambda x: 999999 if x["ajout"] is None else x["ajout"])
+        sections = [("🆕 Derniers ajouts", resultats, "nouv")]
+    else:
+        resultats.sort(key=lambda x: x["score"])
+        sections = [("⚠️ Contenus déconseillés", [r for r in resultats if r["deconseille"]], "bad")]
+
+    # Styles pour les cartes de recommandation
+    st.markdown("""
+    <style>
+    .rec-card-rec { background: linear-gradient(135deg, rgba(0,163,146,0.20) 0%, rgba(0,82,75,0.35) 100%); border:1px solid rgba(0,163,146,0.4); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
+    .rec-card-mid { background: rgba(8,55,50,0.55); border:1px solid rgba(18,90,84,0.4); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
+    .rec-card-bad { background: rgba(60,30,30,0.35); border:1px solid rgba(200,80,80,0.3); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
+    .rec-titre { font-size:1.1em; font-weight:700; color:#F0FAF8; margin-bottom:4px; }
+    .rec-meta { font-size:0.85em; color:#9DC5BF; margin-bottom:8px; }
+    .rec-score { font-size:1.4em; font-weight:800; color:#CEDC00; }
+    .rec-tag-ok { display:inline-block; padding:3px 10px; margin:2px 4px 2px 0; border-radius:12px; background:rgba(0,163,146,0.25); color:#7EE0D3; font-size:0.8em; font-weight:600; }
+    .rec-tag-warn { display:inline-block; padding:3px 10px; margin:2px 4px 2px 0; border-radius:12px; background:rgba(237,34,36,0.2); color:#FF9E9E; font-size:0.8em; font-weight:600; }
+    .rec-score-bar { height:6px; background:rgba(0,0,0,0.3); border-radius:3px; margin-top:6px; overflow:hidden; }
+    .rec-score-fill { height:100%; border-radius:3px; background: linear-gradient(90deg, #00524B, #00A392, #CEDC00); }
+    </style>
+    """, unsafe_allow_html=True)
+
+    for (nom_titre, groupe, cls) in sections:
+        if not groupe: continue
+        st.divider()
+        st.markdown(f"### {nom_titre} ({len(groupe)})")
+        # Affichage par cartes colonnes pour chaque element
+        for r in groupe:
+            img = image_tmdb(r.get("tmdb"), "movie" if r["type"]=="Film" else "tv")
+            cimg, cc = st.columns([0.10, 0.90])
+            with cimg:
+                if img:
+                    st.image(img, use_container_width=True)
+                else:
+                    st.markdown("🎬" if r["type"]=="Film" else "📺")
+            with cc:
+                an_part = f"({r['annee']})" if r.get('annee') else ""
+                aj_part = f"· 📥 Ajouté il y a {r['ajout']}j" if r['ajout'] is not None else ""
+                note_part = f"{r['note']}" if r['note'] else "?"
+                st.markdown(f"""
+                <div class="rec-card-{cls}">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div>
+                            <div class="rec-titre">{r['type']} — {r['titre']} {an_part}</div>
+                            <div class="rec-meta">⭐ {note_part}<b>/10</b> · ⏱️ {r['temps']} · 🎭 {r['genres']} {aj_part}</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div class="rec-score">{r['score']}</div>
+                            <div style="font-size:0.7em; color:#9DC5BF;">/100</div>
+                        </div>
+                    </div>
+                    <div class="rec-score-bar"><div class="rec-score-fill" style="width:{r['score']}%"></div></div>
+                    <div style="margin-top:10px;">
+                        {''.join(f'<span class="rec-tag-ok">✅ {x}</span>' for x in r['raisons'])}
+                        {''.join(f'<span class="rec-tag-warn">⚠️ {x}</span>' for x in r['averti'])}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
 def page_wrapped():
     st.subheader("🎬 Rendez-vous annuel")
     st.info("🚧 Bientôt : récapitulatif annuel façon Spotify Wrapped.")
@@ -1450,6 +1844,7 @@ else:
     elif p == "👻 Progression Fantôme": page_fantomes(utz)
     elif p == "🧹 Nettoyage des listes": page_nettoyage(utz)
     elif p == "🔍 Recherche de doublons": page_doublons(utz)
+    elif p == "🎯 Que regarder ?": page_quoi_regarder(utz)
     elif p == "📊 Statistiques": page_stats(utz)
     elif p == "📅 Calendrier des sorties": page_calendrier(utz)
     elif p == "🎬 Rendez-vous annuel": page_wrapped()
