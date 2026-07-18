@@ -67,40 +67,35 @@ st.markdown("""
         --am-text-muted: #9DC5BF;
     }
 
-    /* Cache le ruban Streamlit par defaut qui prend de la place et gene le scroll */
-    #MainMenu {visibility: hidden;}
-    header[data-testid="stHeader"] {visibility: hidden; background: transparent !important;}
+    /* On garde le ruban Streamlit visible, mais on l'harmonise et on ajoute de la marge
+       pour que le scroll ne passe pas dessous */
+    section[data-testid="stSidebar"] > div:first-child { padding-top: 0 !important; }
     footer {visibility: hidden;}
+    .stApp { margin-top: 0; padding-top: 0; }
+    .block-container {
+        padding-top: 3.5rem !important;
+    }
 
-    /* FOND ASTON MARTIN 2026 - VERSION A FIDELE A LA CAPTURE :
-       diffusion TRES LENTE et progressive du vert clair, qui recouvre toute la page.
-       Le vert mat moyen est present sur 70% de la hauteur puis s'assombrit doucement. */
+    /* FOND ASTON MARTIN 2026 - Diffusion radiale en "tache d'encre" depuis le centre/haut :
+       - le centre est un peu plus clair (vert moyen mat)
+       - les cotes gauche/droite et le bas s'assombrissent PROGRESSIVEMENT
+       - pas de "point lumineux" vif comme un spot, une diffusion tres douce
+       - les cotes sont plus sombres que le centre, le bas plus sombre que le haut */
     .stApp {
         background:
-            /* halo principal large et doux centre-haut, diffusion tres etendue */
-            radial-gradient(ellipse 120% 70% at 50% 0%, rgba(0, 105, 95, 0.9) 0%, rgba(0, 80, 73, 0.6) 35%, transparent 70%),
-            /* assombrissement progressif des coins gauche/droite/bas */
-            radial-gradient(ellipse 80% 60% at 0% 100%, rgba(1, 22, 20, 0.9) 0%, transparent 55%),
-            radial-gradient(ellipse 80% 60% at 100% 100%, rgba(1, 22, 20, 0.9) 0%, transparent 55%),
-            /* couleur de base : vert mat profond sur toute la page */
-            linear-gradient(180deg, #005951 0%, #004841 40%, #002D2A 75%, #011917 100%) !important;
+            /* assombrissement doux sur le bord gauche */
+            radial-gradient(ellipse 50% 100% at 0% 50%, rgba(1,22,20,0.55) 0%, transparent 60%),
+            /* assombrissement doux sur le bord droit */
+            radial-gradient(ellipse 50% 100% at 100% 50%, rgba(1,22,20,0.55) 0%, transparent 60%),
+            /* assombrissement par le bas */
+            radial-gradient(ellipse 100% 50% at 50% 100%, rgba(1,22,20,0.85) 0%, rgba(1,22,20,0.3) 60%, transparent 100%),
+            /* leger eclairage qui part du centre-haut, tres diffus, pas vif */
+            radial-gradient(ellipse 100% 70% at 50% 0%, rgba(0,95,87,1) 0%, rgba(0,78,72,0.9) 30%, rgba(0,55,51,0.7) 60%, transparent 85%),
+            /* couleur de base : vert moyen mat */
+            #00554D !important;
         background-attachment: fixed !important;
         min-height: 100vh;
     }
-
-    /* Header sticky persistant pour remplacer le ruban Streamlit */
-    .custom-top-bar {
-        position: sticky; top: 0; z-index: 999;
-        background: rgba(2, 20, 18, 0.85);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border-bottom: 1px solid var(--am-border);
-        padding: 10px 20px;
-        display: flex; align-items: center; gap: 16px;
-        margin: -1.2rem -1.2rem 1rem -1.2rem;
-    }
-    .custom-top-bar .title-top { font-size: 1.2em; font-weight: 700; color: var(--am-text); margin:0; }
-    .custom-top-bar .info-top { font-size: 0.9em; color: var(--am-text-muted); margin:0; }
 
     /* Badges obtenus */
     .badge-obtenu {
@@ -194,12 +189,26 @@ st.markdown("""
     div[data-baseweb="select"] > div,
     div[data-baseweb="input"] > div,
     div[data-testid="stDataFrame"],
-    div[data-testid="stSlider"] > div {
+    div[data-testid="stSlider"] > div,
+    div[data-testid="stSelectSlider"] > div,
+    div[data-testid="stDownloadButton"] > button {
         background-color: var(--am-bg-card) !important;
         backdrop-filter: blur(14px) !important;
+        -webkit-backdrop-filter: blur(14px) !important;
         border-radius: 16px !important;
         border: 1px solid var(--am-border) !important;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.22) !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.35) !important;
+    }
+    /* Contraste supplementaire pour les selects/inputs pour qu'ils ne se fondent pas dans le fond */
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div {
+        background: rgba(3, 30, 27, 0.88) !important;
+        border: 1px solid rgba(0,163,146,0.45) !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
+    }
+    div[data-baseweb="select"] > div:hover,
+    div[data-baseweb="input"] > div:hover {
+        border-color: var(--am-green) !important;
     }
 
     /* Messages connexion : palette ASTON COHERENTE, plus de bleu/olive qui jurent.
@@ -247,19 +256,44 @@ st.markdown("""
     }
     div.stError svg, div[data-testid="stAlert"][kind="error"] svg { fill: #ED2224 !important; }
 
-    .stButton > button { font-weight: 600; padding: 0.7em 1.3em; color: var(--am-text) !important; transition: all 0.25s ease; }
-    .stButton > button:hover { background: var(--am-bg-card-hover) !important; transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,163,146,0.25); border-color: var(--am-green) !important; }
-    .stButton > button[kind="primary"] { background: linear-gradient(135deg, var(--am-green) 0%, var(--am-green-aston) 100%) !important; border: none !important; font-weight: 700; }
+    .stButton > button {
+        font-weight: 600; padding: 0.7em 1.3em; color: var(--am-text) !important;
+        transition: all 0.25s ease;
+        background: rgba(3, 30, 27, 0.85) !important;
+        border: 1px solid rgba(0,163,146,0.4) !important;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.35) !important;
+    }
+    .stButton > button:hover {
+        background: var(--am-bg-card-hover) !important;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 26px rgba(0,163,146,0.3) !important;
+        border-color: var(--am-green) !important;
+    }
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, var(--am-green) 0%, var(--am-green-aston) 100%) !important;
+        border: none !important; font-weight: 700;
+        box-shadow: 0 4px 18px rgba(0,163,146,0.35) !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        box-shadow: 0 8px 28px rgba(0,163,146,0.5) !important;
+    }
 
     div[data-testid="stDownloadButton"] > button {
-        background: var(--am-bg-card) !important;
+        background: rgba(3, 30, 27, 0.85) !important;
         backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
         border-radius: 16px !important;
-        border: 1px solid var(--am-border) !important;
+        border: 1px solid rgba(0,163,146,0.4) !important;
         color: var(--am-text) !important;
         font-weight: 600;
         width: 100%;
         padding: 0.7em 1.3em;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.35) !important;
+    }
+    div[data-testid="stDownloadButton"] > button:hover {
+        background: var(--am-bg-card-hover) !important;
+        border-color: var(--am-green) !important;
+        box-shadow: 0 8px 26px rgba(0,163,146,0.3) !important;
     }
 
     section[data-testid="stSidebar"] {
@@ -761,13 +795,15 @@ def naviguer():
 # ==================================================
 
 def entete():
-    cl, ct = st.columns([0.08,0.92])
+    # En-tete COMPACT : logo + titre + connexion sur une seule ligne
+    cl, ct, ci, cd = st.columns([0.05, 0.40, 0.42, 0.13])
     with cl:
-        try: st.image("trakt-logo.svg", width=60)
+        try: st.image("trakt-logo.svg", width=36)
         except: pass
     with ct:
-        st.title("Trakt Smart Lists")
+        st.markdown("<h3 style='margin:0; padding:4px 0 0 0; color:#F0FAF8; font-weight:800; font-size:1.3em;'>Trakt Smart Lists</h3>", unsafe_allow_html=True)
     if "access_token" not in st.session_state:
+        st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
         return None
     if "token_heure" in st.session_state and (time.time() - st.session_state["token_heure"]) > 7*86400:
         nouveau = rafraichir_token(st.session_state["refresh_token"])
@@ -778,14 +814,21 @@ def entete():
         st.session_state["infos_h"] = time.time()
     infos = st.session_state["infos"]
     pseudo, utz = infos["pseudo"], infos["tz"]
-    ci, cd = st.columns([4,1])
     with ci:
-        st.info(f"👤 Connecté en tant que **{pseudo}** • 🕒 `{infos['tz_name']}`")
+        # Bandeau de connexion THEMATISE, plus de st.info bleu canard
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, rgba(0,102,95,0.5) 0%, rgba(0,70,65,0.6) 100%);
+                    border:1px solid rgba(0,163,146,0.4); border-radius:12px;
+                    padding:10px 16px; margin-top:2px; color:#F0FAF8;
+                    font-size:0.92em; backdrop-filter: blur(12px);">
+            👤 Connecté en tant que <b>{pseudo}</b> • 🕒 <span style="color:#9DC5BF;">{infos['tz_name']}</span>
+        </div>
+        """, unsafe_allow_html=True)
     with cd:
-        if st.button("🚪 Déconnexion", use_container_width=True):
+        if st.button("🚪", use_container_width=True, help="Déconnexion"):
             oublier_connexion()
             st.rerun()
-    st.divider()
+    st.markdown("<div style='height:2px;'></div>", unsafe_allow_html=True)
     if "res" in st.session_state:
         h = st.session_state["historique"]
         res = st.session_state["res"]
@@ -806,17 +849,27 @@ def entete():
                 st.rerun()
         with c3:
             st.download_button("📥 Rapport Excel", data=xl, file_name=f"trakt_{pseudo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        st.divider()
+    st.markdown("<hr style='margin:0.4rem 0 1rem 0; border-color: rgba(18,90,84,0.4);'/>", unsafe_allow_html=True)
     return utz
 
 def bloc_lancement():
     if "res" in st.session_state:
         return False
     if "historique" in st.session_state:
-        st.info("ℹ️ Ton historique est déjà chargé, l'analyse sera rapide.")
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, rgba(0,102,95,0.5) 0%, rgba(0,70,65,0.6) 100%);
+                    border:1px solid rgba(0,163,146,0.4); border-radius:14px;
+                    padding:14px 18px; color:#F0FAF8; margin-bottom:14px;">
+            ℹ️ Ton historique est déjà chargé, l'analyse sera rapide.
+        </div>""", unsafe_allow_html=True)
         txt = "🔄 Lancer l'analyse rapide"
     else:
-        st.info("ℹ️ Lance l'analyse pour accéder à tous les outils.")
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, rgba(0,102,95,0.5) 0%, rgba(0,70,65,0.6) 100%);
+                    border:1px solid rgba(0,163,146,0.4); border-radius:14px;
+                    padding:14px 18px; color:#F0FAF8; margin-bottom:14px;">
+            ℹ️ Lance l'analyse pour accéder à tous les outils.
+        </div>""", unsafe_allow_html=True)
         txt = "🔍 Lancer l'analyse complète"
     if st.button(txt, type="primary", use_container_width=True):
         lancer_analyse()
