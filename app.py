@@ -67,24 +67,24 @@ st.markdown("""
         --am-text-muted: #9DC5BF;
     }
 
-    /* DEGRADE RADIAL COMME TRAKT : point clair au centre */
+    /* DEGRADE LINEAIRE PROPRE, MEME STYLE QUE LES BOUTONS */
     .stApp {
-        background: radial-gradient(ellipse at 50% 0%, #00665F 0%, #00332F 45%, #021412 100%) !important;
+        background: linear-gradient(180deg, #00A392 0%, #00665F 35%, #003F3A 70%, #021412 100%) !important;
         background-attachment: fixed !important;
         min-height: 100vh;
     }
 
-    /* Ajustement pour mobile : affiches plus petites */
+    /* Ajustement pour mobile */
     @media (max-width: 768px) {
         div[data-testid="stImage"] img {
-            max-width: 90px !important;
+            max-width: 80px !important;
         }
         div[data-testid="stMetricValue"] {
-            font-size: 1.3em !important;
+            font-size: 1.2em !important;
         }
     }
 
-    /* Cartes et métriques : texte pas coupé */
+    /* Cartes et métriques */
     div[data-testid="stMetric"] {
         padding: 24px 16px !important;
         overflow: visible !important;
@@ -92,16 +92,14 @@ st.markdown("""
     }
     div[data-testid="stMetricValue"] {
         color: var(--am-text) !important;
-        font-size: 1.6em !important;
+        font-size: 1.5em !important;
         font-weight: 800 !important;
         white-space: normal !important;
         word-wrap: break-word !important;
-        overflow: visible !important;
     }
     div[data-testid="stMetricLabel"] p {
         color: var(--am-text-muted) !important;
         font-size: 0.9em !important;
-        font-weight: 500;
     }
 
     div[data-testid="stMetric"],
@@ -110,7 +108,8 @@ st.markdown("""
     div.stButton > button,
     div[data-baseweb="select"] > div,
     div[data-baseweb="input"] > div,
-    div[data-testid="stDataFrame"] {
+    div[data-testid="stDataFrame"],
+    div[data-testid="stSlider"] > div {
         background-color: var(--am-bg-card) !important;
         backdrop-filter: blur(14px) !important;
         border-radius: 16px !important;
@@ -204,23 +203,8 @@ st.markdown("""
     .progress-mid { background: linear-gradient(90deg, var(--am-green) 0%, var(--am-lime) 100%); }
     .progress-high { background: linear-gradient(90deg, var(--am-lime) 0%, #E8F064 100%); }
 
-    /* JS pour fermer le menu sur mobile : plus efficace */
+/* JS retire, plus de tentative de fermeture automatique */
 </style>
-<script>
-setTimeout(function() {
-    // Ferme la sidebar quand on clique sur un element du menu sur mobile
-    function closeSidebar() {
-        if (window.innerWidth < 768) {
-            const closeBtn = document.querySelector('button[aria-label="Close sidebar"]') || document.querySelector('button[kind="header"]');
-            if (closeBtn) closeBtn.click();
-        }
-    }
-    const sidebarItems = document.querySelectorAll('section[data-testid="stSidebar"] input[type="radio"]');
-    sidebarItems.forEach(item => {
-        item.addEventListener('change', closeSidebar);
-    });
-}, 1500);
-</script>
 """, unsafe_allow_html=True)
 
 cookies = CookieController()
@@ -915,7 +899,7 @@ def page_nettoyage(utz):
         st.success(st.session_state[msg])
         del st.session_state[msg]
     st.subheader("🧹 Nettoyage des listes")
-    st.caption("Retire les contenus déjà vus. La colonne **À revoir ?** identifie les contenus que tu as ajoutés *après* les avoir vus : tu souhaites sûrement les garder.")
+    st.caption("Retire les contenus déjà vus. La colonne **Ajouté après visionnage** identifie les contenus que tu as ajoutés *après* les avoir vus : tu souhaites sûrement les garder.")
     if not res:
         st.success("Tes listes sont à jour ! 🎉")
     else:
@@ -924,8 +908,8 @@ def page_nettoyage(utz):
         ta = tab[["type","titre","annee","vues","dernier","ajoute_apres","liste"]].copy()
         ta["dernier"] = pd.to_datetime(ta["dernier"]).dt.tz_convert(utz).dt.strftime("%d/%m/%Y %H:%M")
         ta.insert(0,"Sel",False)
-        ta.columns = ["Sel","Type","Titre","Année","Vues","Dernier","À revoir ?","Liste"]
-        ed = st.data_editor(ta, use_container_width=True, hide_index=True, disabled=["Type","Titre","Année","Vues","Dernier","À revoir ?","Liste"], key="ed_vus")
+        ta.columns = ["Sel","Type","Titre","Année","Vues","Dernier","Ajouté après visionnage","Liste"]
+        ed = st.data_editor(ta, use_container_width=True, hide_index=True, disabled=["Type","Titre","Année","Vues","Dernier","Ajouté après visionnage","Liste"], key="ed_vus")
         nb = int(ed["Sel"].sum())
         if nb:
             conf = "conf_vus"
@@ -1078,7 +1062,7 @@ def page_stats(utz):
     with f1:
         tc = st.selectbox("Type de contenu", ["Tous","Films","Séries"])
     with f2:
-        periode = st.selectbox("Période", ["Tout","Cette année","12 derniers mois","6 derniers mois","Ce mois-ci","Mois dernier","Aujourd'hui"], index=0)
+        periode = st.selectbox("Période", ["Tout","Cette année","12 derniers mois","6 derniers mois","Ce mois-ci","Mois dernier","Aujourd'hui","Période personnalisée"], index=0)
     with f3:
         genres = set()
         if tc in ["Tous","Films"] and not films.empty:
@@ -1088,6 +1072,17 @@ def page_stats(utz):
             for g in eps["genre"].str.split(", "):
                 genres.update([x for x in g if x != "Inconnu"])
         genre = st.selectbox("Genre", ["Tous"] + sorted(genres))
+
+    # Slider mois si periode personnalisée
+    toutes_dates = []
+    for df_tmp in [films, eps]:
+        if not df_tmp.empty:
+            toutes_dates.extend(pd.to_datetime(df_tmp["date"], utc=True).dt.tz_convert(utz).tolist())
+    if periode == "Période personnalisée" and toutes_dates:
+        dates_df = pd.DataFrame({"date": toutes_dates})
+        dates_df["ma"] = dates_df["date"].dt.strftime("%m-%Y")
+        mois_dispo = sorted(dates_df["ma"].unique(), key=lambda x: (int(x.split("-")[1]), int(x.split("-")[0])))
+        periode_mois = st.select_slider("Sélectionne la période (mois)", options=mois_dispo, value=(mois_dispo[0], mois_dispo[-1]))
 
     # Construction données
     dfs = []
@@ -1109,7 +1104,13 @@ def page_stats(utz):
     mt = datetime.now(utz)
 
     # Appliquer filtre periode
-    df = appliquer_filtres_periode(df, mt, periode)
+    if periode == "Période personnalisée" and toutes_dates:
+        d_deb = datetime.strptime(periode_mois[0], "%m-%Y").replace(tzinfo=utz)
+        d_fin = datetime.strptime(periode_mois[1], "%m-%Y").replace(day=28) + timedelta(days=4)
+        d_fin = d_fin.replace(tzinfo=utz)
+        df = df[(df["date_dt"] >= d_deb) & (df["date_dt"] <= d_fin)]
+    else:
+        df = appliquer_filtres_periode(df, mt, periode)
     if genre != "Tous":
         df = df[df["genre"].str.contains(genre, na=False)]
     if df.empty:
@@ -1134,7 +1135,13 @@ def page_stats(utz):
     if tc in ["Tous","Séries"] and not eps.empty:
         ej = eps.copy()
         ej["date_dt"] = pd.to_datetime(ej["date"], utc=True).dt.tz_convert(utz)
-        ej = appliquer_filtres_periode(ej, mt, periode)
+        if periode == "Période personnalisée" and toutes_dates:
+            d_deb_e = datetime.strptime(periode_mois[0], "%m-%Y").replace(tzinfo=utz)
+            d_fin_e = datetime.strptime(periode_mois[1], "%m-%Y").replace(day=28) + timedelta(days=4)
+            d_fin_e = d_fin_e.replace(tzinfo=utz)
+            ej = ej[(ej["date_dt"] >= d_deb_e) & (ej["date_dt"] <= d_fin_e)]
+        else:
+            ej = appliquer_filtres_periode(ej, mt, periode)
         if genre != "Tous":
             ej = ej[ej["genre"].str.contains(genre, na=False)]
         if not ej.empty:
@@ -1152,7 +1159,13 @@ def page_stats(utz):
     if tc in ["Tous","Séries"] and not eps.empty:
         ep_n = eps.copy()
         ep_n["date_dt"] = pd.to_datetime(ep_n["date"], utc=True).dt.tz_convert(utz)
-        ep_n = appliquer_filtres_periode(ep_n, mt, periode)
+        if periode == "Période personnalisée" and toutes_dates:
+            d_deb_p = datetime.strptime(periode_mois[0], "%m-%Y").replace(tzinfo=utz)
+            d_fin_p = datetime.strptime(periode_mois[1], "%m-%Y").replace(day=28) + timedelta(days=4)
+            d_fin_p = d_fin_p.replace(tzinfo=utz)
+            ep_n = ep_n[(ep_n["date_dt"] >= d_deb_p) & (ep_n["date_dt"] <= d_fin_p)]
+        else:
+            ep_n = appliquer_filtres_periode(ep_n, mt, periode)
         if genre != "Tous":
             ep_n = ep_n[ep_n["genre"].str.contains(genre, na=False)]
         if not ep_n.empty and "network" in ep_n.columns:
