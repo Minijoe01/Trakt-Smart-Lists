@@ -1353,14 +1353,66 @@ def page_fantomes(utz):
 def page_calendrier(utz):
     if bloc_lancement(): return
     st.subheader("📅 Calendrier des sorties")
-    st.caption("Les prochaines sorties attendues des films et séries de ta liste de suivi.")
+    st.caption("Les prochaines sorties attendues des films et séries présents dans tes listes.")
     at = st.session_state["access_token"]
 
+    # Sélecteur de liste (comme dans "Que regarder ?")
+    listes_dispo = [("🌟 Toutes les listes confondues", "__ALL__"),
+                    ("👀 Liste de suivi", "watchlist")]
+    for s in st.session_state.get("stats", []):
+        if s["nom"] != "Liste de suivi":
+            listes_dispo.append((f"📋 {s['nom']}", s["nom"]))
+
+    choix_label = st.selectbox("📋 Liste à explorer", [l[0] for l in listes_dispo], key="cal_liste")
+    lid_nom = dict(listes_dispo)[choix_label]
+
     with st.spinner("Récupération du calendrier..."):
-        items = recuperer_watchlist(at)
+        if lid_nom == "__ALL__":
+            items = []
+            try:
+                items.extend(recuperer_watchlist(at))
+            except Exception:
+                pass
+            try:
+                for l in recuperer_listes(at):
+                    try:
+                        items.extend(recuperer_contenu_liste(at, l["ids"]["trakt"]))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        elif lid_nom == "watchlist":
+            items = recuperer_watchlist(at)
+        else:
+            l_id = None
+            try:
+                for l in recuperer_listes(at):
+                    if l["name"] == lid_nom:
+                        l_id = l["ids"]["trakt"]; break
+            except Exception:
+                pass
+            items = recuperer_contenu_liste(at, l_id) if l_id else recuperer_watchlist(at)
+
+        # Dédoublonner (un même film/série peut être dans plusieurs listes)
+        vus = set()
+        items_uniques = []
+        for it in items:
+            if it["type"] == "movie":
+                cle = ("movie", it["movie"]["ids"]["trakt"])
+            elif it["type"] == "show":
+                cle = ("show", it["show"]["ids"]["trakt"])
+            else:
+                continue
+            if cle in vus: continue
+            vus.add(cle)
+            items_uniques.append(it)
+        items = items_uniques
+
         mt = datetime.now(utz)
         sorties = []
         for it in items:
+            date_sortie = None
+            status = ""
             if it["type"] == "movie":
                 med = it["movie"]
                 titre = med.get("title","")
@@ -1368,7 +1420,6 @@ def page_calendrier(utz):
                 genre = ", ".join(med.get("genres") or [])
                 note = med.get("rating") or 0
                 tmdb = med["ids"].get("tmdb")
-                # released = la date de sortie cinema
                 date_sortie = med.get("released")
                 typ = "Film"
             elif it["type"] == "show":
@@ -1378,17 +1429,11 @@ def page_calendrier(utz):
                 genre = ", ".join(med.get("genres") or [])
                 note = med.get("rating") or 0
                 tmdb = med["ids"].get("tmdb")
-                # Pour les series, on prend l'annee de la prochaine saison si dispo
-                # Trakt ne donne pas toujours la date exacte dans l'extended, on se base sur year/status
-                date_sortie = None
-                # Premier essai : aired_episodes vs status
-                airs = med.get("airs") or {}
                 status = med.get("status","")
                 typ = "Série"
             else:
                 continue
 
-            # Formatage date
             ds = None
             j_restant = None
             label = ""
@@ -1401,9 +1446,9 @@ def page_calendrier(utz):
                     elif j_restant == 0:
                         label = "AUJOURD'HUI"
                     elif j_restant <= 7:
-                        label = f"Cette semaine ({j_restant}j)"
+                        label = "Cette semaine"
                     elif j_restant <= 30:
-                        label = f"Ce mois ({j_restant}j)"
+                        label = "Ce mois"
                     elif j_restant <= 90:
                         label = f"Dans {j_restant}j"
                     elif j_restant <= 365:
@@ -1413,13 +1458,27 @@ def page_calendrier(utz):
                 except Exception:
                     ds = None
             else:
-                # Pas de date precise : afficher l'annee si elle est future
-                if annee and annee >= mt.year:
-                    label = str(annee)
-                    j_restant = 999999
+                if typ == "Série":
+                    nb_ep = med.get("aired_episodes") or 0
+                    if status in ("ended", "canceled"):
+                        label = "Déjà disponible"
+                        j_restant = -1
+                    elif status in ("returning", "continuing"):
+                        if nb_ep > 0:
+                            label = "En cours (disponible)"
+                            j_restant = -1
+                        else:
+                            label = "Prochainement"
+                            j_restant = 999999
+                    elif status in ("in production", "planned", "pilot"):
+                        label = f"{annee}" if annee and annee >= mt.year else "Prochainement"
+                        j_restant = 999999
+                    else:
+                        label = "Déjà disponible" if nb_ep > 0 else "Prochainement"
+                        j_restant = -1 if nb_ep > 0 else 999999
                 else:
-                    if typ == "Série" and status in ("returning", "in production", "planned"):
-                        label = "Prochainement"
+                    if annee and annee > mt.year:
+                        label = str(annee)
                         j_restant = 999999
                     else:
                         label = "Déjà disponible"
@@ -1431,38 +1490,39 @@ def page_calendrier(utz):
                 "label": label, "img": img, "status": status if typ=="Série" else ""
             })
 
-    # Filtres
     cf1, cf2, cf3 = st.columns(3)
     with cf1:
-        f_type = st.selectbox("Type", ["Tous", "Films", "Séries"])
+        f_type = st.selectbox("Type", ["Tous", "Films", "Séries"], key="cal_type")
     with cf2:
-        f_delai = st.selectbox("Délai", ["Toutes les sorties", "Bientôt (< 3 mois)", "Ce mois-ci", "Cette semaine", "Aujourd'hui", "Déjà disponibles"])
+        f_delai = st.selectbox("Délai", ["Toutes les sorties", "À venir (futur)", "Bientôt (< 3 mois)", "Ce mois-ci", "Cette semaine", "Aujourd'hui", "Déjà disponibles"], key="cal_delai")
     with cf3:
-        f_tri = st.selectbox("Trier par", ["Date (proche → loin)", "Note (meilleure d'abord)", "Titre A→Z"])
+        f_tri = st.selectbox("Trier par", ["Date (proche → loin)", "Note (meilleure d'abord)", "Titre A→Z"], key="cal_tri")
 
-    # Filtrage
-    df = pd.DataFrame(sorties)
-    if f_type == "Films": df = df[df["type"]=="Film"]
-    if f_type == "Séries": df = df[df["type"]=="Série"]
+    df = pd.DataFrame(sorties) if sorties else pd.DataFrame(columns=["type","titre","annee","note","genre","date","j_restant","label","img","status"])
+    if not df.empty:
+        if f_type == "Films": df = df[df["type"]=="Film"]
+        if f_type == "Séries": df = df[df["type"]=="Série"]
 
-    if f_delai == "Bientôt (< 3 mois)":
-        df = df[(df["j_restant"] >= 0) & (df["j_restant"] <= 92)]
-    elif f_delai == "Ce mois-ci":
-        df = df[(df["j_restant"] >= 0) & (df["j_restant"] <= 31)]
-    elif f_delai == "Cette semaine":
-        df = df[(df["j_restant"] >= 0) & (df["j_restant"] <= 7)]
-    elif f_delai == "Aujourd'hui":
-        df = df[df["j_restant"] == 0]
-    elif f_delai == "Déjà disponibles":
-        df = df[df["j_restant"] < 0]
+        if f_delai == "À venir (futur)":
+            df = df[df["j_restant"] >= 0]
+        elif f_delai == "Bientôt (< 3 mois)":
+            df = df[(df["j_restant"] >= 0) & (df["j_restant"] <= 92)]
+        elif f_delai == "Ce mois-ci":
+            df = df[(df["j_restant"] >= 0) & (df["j_restant"] <= 31)]
+        elif f_delai == "Cette semaine":
+            df = df[(df["j_restant"] >= 0) & (df["j_restant"] <= 7)]
+        elif f_delai == "Aujourd'hui":
+            df = df[df["j_restant"] == 0]
+        elif f_delai == "Déjà disponibles":
+            df = df[df["j_restant"] < 0]
 
-    if f_tri == "Date (proche → loin)":
-        df["tri_key"] = df["j_restant"].apply(lambda x: -999999 if x < 0 else x)
-        df = df.sort_values("tri_key")
-    elif f_tri == "Note (meilleure d'abord)":
-        df = df.sort_values("note", ascending=False)
-    else:
-        df = df.sort_values("titre")
+        if f_tri == "Date (proche → loin)":
+            df["tri_key"] = df["j_restant"].apply(lambda x: -999999 if x is None or x < 0 else x)
+            df = df.sort_values("tri_key")
+        elif f_tri == "Note (meilleure d'abord)":
+            df = df.sort_values("note", ascending=False)
+        else:
+            df = df.sort_values("titre")
 
     st.markdown(f"**{len(df)}** contenu(s) dans le calendrier.")
     st.divider()
@@ -1474,20 +1534,30 @@ def page_calendrier(utz):
         </div>""", unsafe_allow_html=True)
         return
 
-    # Groupement par label pour les sorties a venir
     groupes = {}
     for _, r in df.iterrows():
         groupes.setdefault(r["label"], []).append(r)
 
-    # Ordre d'affichage : aujourd'hui, cette semaine, ce mois, puis dans l'ordre de date
-    ordre = ["AUJOURD'HUI", "Cette semaine (7j)", "Cette semaine", "Ce mois", "Ce mois-ci", "Bientôt",
-             "Déjà disponible"]
-    labels_ord = sorted(groupes.keys(), key=lambda x: (
-        ordre.index(x) if x in ordre else 100,
-        0 if x == "Déjà disponible" else 1
-    ))
+    ordre_priorite = {"AUJOURD'HUI": 0, "Cette semaine": 1, "Ce mois": 2}
+    def cle_tri(lab):
+        if lab in ordre_priorite: return ordre_priorite[lab]
+        if lab == "Déjà disponible": return 999
+        if lab.startswith("Dans ") and lab.endswith("j"):
+            try: return 10 + int(lab[5:-1])
+            except: return 50
+        if lab.startswith("En cours"): return 900
+        return 500
+
+    labels_ord = sorted(groupes.keys(), key=cle_tri)
     if "Déjà disponible" in labels_ord:
         labels_ord = [l for l in labels_ord if l != "Déjà disponible"] + ["Déjà disponible"]
+    if "En cours (disponible)" in labels_ord:
+        labels_ord = [l for l in labels_ord if l != "En cours (disponible)"]
+        idx_dp = len(labels_ord) if "Déjà disponible" not in labels_ord else labels_ord.index("Déjà disponible")
+        labels_ord.insert(idx_dp, "En cours (disponible)")
+
+    extra_map = {"returning":"🔄 En cours", "continuing":"🔄 En cours", "in production":"🎬 En production",
+                 "planned":"📋 Planifiée", "pilot":"📋 Pilote", "canceled":"❌ Annulée", "ended":"✅ Terminée"}
 
     for lab in labels_ord:
         groupe = groupes[lab]
@@ -1496,27 +1566,32 @@ def page_calendrier(utz):
             with st.container(border=True):
                 ci, cd = st.columns([0.10, 0.90])
                 with ci:
-                    if r["img"]:
+                    if r.get("img"):
                         st.image(r["img"], use_container_width=True)
                     else:
                         st.markdown("🎬" if r["type"]=="Film" else "📺")
                 with cd:
                     an = f" ({r['annee']})" if pd.notna(r["annee"]) else ""
                     st.markdown(f"**{r['type']} — {r['titre']}**{an}")
-                    note_txt = f"⭐ {r['note']:.1f}/10" if r["note"] else ""
-                    if r["date"] is not None and pd.notna(r["date"]):
+                    note_txt = f"⭐ {r['note']:.1f}/10" if r.get("note") and r["note"] > 0 else ""
+                    extra = ""
+                    if r["type"] == "Série" and r.get("status"):
+                        extra = " · " + extra_map.get(r["status"], r["status"])
+                    if r.get("date") is not None and pd.notna(r["date"]):
                         date_txt = r["date"].strftime("%d/%m/%Y")
                         jrest = r["j_restant"]
                         if jrest == 0: jtxt = "🎉 Aujourd'hui !"
                         elif jrest < 0: jtxt = "✅ Disponible"
-                        else: jtxt = f"Dans {jrest} jours"
-                        st.caption(f"📅 Sortie le {date_txt} · {jtxt} · 🎭 {r['genre']} · {note_txt}")
+                        else: jtxt = f"Dans {int(jrest)} jours"
+                        caption = f"📅 Sortie le {date_txt} · {jtxt} · 🎭 {r['genre']}"
+                        if note_txt: caption += f" · {note_txt}"
+                        caption += extra
+                        st.caption(caption)
                     else:
-                        extra = ""
-                        if r["type"]=="Série" and r["status"]:
-                            extra_map = {"returning":"🔄 En cours", "in production":"🎬 En production", "planned":"📋 Planifiée", "canceled":"❌ Annulée", "ended":"✅ Terminée"}
-                            extra = " · " + extra_map.get(r["status"], r["status"])
-                        st.caption(f"📅 {lab} · 🎭 {r['genre']} · {note_txt}{extra}")
+                        caption = f"📅 {lab} · 🎭 {r['genre']}"
+                        if note_txt: caption += f" · {note_txt}"
+                        caption += extra
+                        st.caption(caption)
 
 
 def page_succes(utz):
