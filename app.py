@@ -67,11 +67,60 @@ st.markdown("""
         --am-text-muted: #9DC5BF;
     }
 
-    /* DEGRADE DIAGONAL : VERT ASTON SOMBRE en haut a gauche, vert presque noir en bas a droite */
+    /* FOND ASTON MARTIN 2026 : halo radial lumineux centre/haut + profondeur sombre sur les bords et le bas */
     .stApp {
-        background: linear-gradient(135deg, #00665F 0%, #004B46 35%, #021F1D 70%, #021412 100%) !important;
+        background:
+            radial-gradient(ellipse 80% 55% at 50% -10%, rgba(0, 143, 128, 0.85) 0%, rgba(0, 102, 95, 0.45) 42%, transparent 65%),
+            radial-gradient(ellipse 120% 80% at 50% 0%, #005E57 0%, #00433E 35%, #002B28 65%, #021715 100%) !important;
         background-attachment: fixed !important;
         min-height: 100vh;
+    }
+
+    /* Badges obtenus */
+    .badge-obtenu {
+        background: linear-gradient(135deg, rgba(0,163,146,0.25) 0%, rgba(0,82,75,0.45) 100%) !important;
+        border: 1px solid rgba(0,163,146,0.5) !important;
+        backdrop-filter: blur(14px);
+        border-radius: 16px;
+        padding: 20px 16px;
+        text-align: center;
+        box-shadow: 0 0 25px rgba(0,163,146,0.15), 0 8px 24px rgba(0,0,0,0.25);
+        transition: transform 0.25s ease;
+        margin-bottom: 12px;
+    }
+    .badge-obtenu:hover { transform: translateY(-4px); }
+    .badge-obtenu .emoji { font-size: 2.5em; margin-bottom: 8px; }
+    .badge-obtenu .titre { font-size: 1.05em; font-weight: 700; color: #F0FAF8; margin-bottom: 6px; }
+    .badge-obtenu .desc { font-size: 0.82em; color: #9DC5BF; line-height: 1.4; }
+
+    /* Badges verrouilles */
+    .badge-lock {
+        background: rgba(4, 25, 22, 0.55) !important;
+        border: 1px solid rgba(60, 80, 76, 0.4) !important;
+        backdrop-filter: blur(10px);
+        border-radius: 16px;
+        padding: 18px 14px;
+        text-align: center;
+        opacity: 0.65;
+        filter: grayscale(0.7);
+        transition: all 0.25s ease;
+        margin-bottom: 12px;
+    }
+    .badge-lock:hover { opacity: 0.9; filter: grayscale(0.2); transform: translateY(-2px); }
+    .badge-lock .emoji { font-size: 2.2em; margin-bottom: 8px; filter: grayscale(1); opacity: 0.7; }
+    .badge-lock .titre { font-size: 1em; font-weight: 600; color: #7EA8A0; margin-bottom: 6px; }
+    .badge-lock .desc { font-size: 0.8em; color: #6B928C; line-height: 1.4; }
+    .badge-lock .prog-badge {
+        height: 6px;
+        background: rgba(0,0,0,0.3);
+        border-radius: 3px;
+        margin-top: 10px;
+        overflow: hidden;
+    }
+    .badge-lock .prog-badge-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #00524B, #00A392);
+        border-radius: 3px;
     }
 
     @media (max-width: 768px) {
@@ -1052,30 +1101,150 @@ def page_calendrier(utz):
 def page_succes(utz):
     if bloc_lancement(): return
     st.subheader("🏆 Succès")
+    st.caption("Tes badges de grand fan de cinéma et de séries. Tu débloques des badges automatiquement au fil de ton visionnage.")
     h = st.session_state["historique"]
     total_h = sum(m["duree"] for m in h["films_det"])/60 + sum(e["duree"] for e in h["ep_det"])/60
+    total_jours = total_h / 24
     total_films = h["nb_films"]
     total_eps = h["nb_ep"]
+    total_vues = h["nb_vf"] + h["nb_ep"]
 
-    st.caption("Tes badges de visionnage :")
-    badges = []
-    if total_h >= 1: badges.append(("🌱 Première heure", "Tu as dépassé 1h de visionnage"))
-    if total_h >= 24: badges.append(("⏰ 1 jour complet", "24h de visionnage !"))
-    if total_h >= 168: badges.append(("📅 1 semaine", "Tu as passé une semaine entière à regarder des contenus"))
-    if total_films >= 10: badges.append(("🎬 10 films", "10 films vus"))
-    if total_films >= 100: badges.append(("🎞️ 100 films", "100 films vus !"))
-    if total_eps >= 100: badges.append(("📺 100 épisodes", "100 épisodes vus"))
-    if total_eps >= 1000: badges.append(("🔥 1000 épisodes", "1000 épisodes, incroyable !"))
+    # Calculs pour badges de diversite
+    films_df = pd.DataFrame(h["films_det"])
+    eps_df = pd.DataFrame(h["ep_det"])
+    genres_diff = set()
+    annees_diff = set()
+    if not films_df.empty:
+        for g in films_df["genre"].str.split(", "):
+            genres_diff.update([x for x in g if x != "Inconnu"])
+        for a in films_df["annee"].dropna():
+            try: annees_diff.add(int(a))
+            except: pass
+    if not eps_df.empty:
+        for g in eps_df["genre"].str.split(", "):
+            genres_diff.update([x for x in g if x != "Inconnu"])
+        for a in eps_df["annee"].dropna():
+            try: annees_diff.add(int(a))
+            except: pass
+    nb_genres = len(genres_diff)
+    nb_annees = len(annees_diff)
 
-    if badges:
-        cols = st.columns(min(3, len(badges)))
-        for i, (titre, desc) in enumerate(badges):
-            with cols[i%3]:
-                with st.container(border=True):
-                    st.markdown(f"### {titre}")
-                    st.caption(desc)
+    # Marathons detectes
+    rec_jour = 0
+    if not eps_df.empty:
+        ep = eps_df.copy()
+        ep["date_dt"] = pd.to_datetime(ep["date"], utc=True).dt.tz_convert(utz)
+        ep["jour"] = ep["date_dt"].dt.date
+        rec_jour = ep.groupby(["jour","serie"]).size().max() or 0
+
+    # Nocturne : visionnage entre 00h et 5h
+    vues_nuit = 0
+    for df_tmp in [films_df, eps_df]:
+        if not df_tmp.empty:
+            dt = pd.to_datetime(df_tmp["date"], utc=True).dt.tz_convert(utz)
+            vues_nuit += ((dt.dt.hour >= 0) & (dt.dt.hour < 5)).sum()
+
+    # Series avec au moins 10 episodes vus
+    series_10ep = 0
+    series_50ep = 0
+    if not eps_df.empty:
+        par_serie = eps_df.groupby("serie").size()
+        series_10ep = int((par_serie >= 10).sum())
+        series_50ep = int((par_serie >= 50).sum())
+
+    # Liste complete des badges : (id, emoji, titre, desc, condition bool, progression pct pour les lock)
+    badges = [
+        # -- Paliers de temps --
+        ("h1",    "🌱", "Première heure",       "Tu as regardé ton premier contenu",                                  total_h >= 1,        min(total_h/1*100,100)),
+        ("h10",   "⏳", "Dix heures",           "10 heures de visionnage cumulées",                                    total_h >= 10,       min(total_h/10*100,100)),
+        ("h24",   "⏰", "Un jour complet",      "24h passées devant des films et séries",                              total_h >= 24,       min(total_h/24*100,100)),
+        ("h168",  "📅", "Une semaine entière",  "Tu as passé une semaine entière de visionnage (168h)",                total_h >= 168,      min(total_h/168*100,100)),
+        ("h720",  "🗓️", "Un mois de binge",     "30 jours complets de visionnage (720h)",                              total_h >= 720,      min(total_h/720*100,100)),
+        ("h2160", "🏁", "Trimestre sur écran",  "3 mois entiers à regarder des contenus (2160h)",                      total_h >= 2160,     min(total_h/2160*100,100)),
+        ("h8760", "👑", "Une année d'écran",    "1 AN de visionnage cumulé (8760h) — statut de légende",               total_h >= 8760,     min(total_h/8760*100,100)),
+
+        # -- Films --
+        ("f1",    "🎬", "Premier film",         "Ton premier film vu",                                                 total_films >= 1,    min(total_films/1*100,100)),
+        ("f10",   "🎞️", "Dix films",            "10 films différents vus",                                             total_films >= 10,   min(total_films/10*100,100)),
+        ("f50",   "🎥", "Cinéphile",            "50 films différents vus",                                             total_films >= 50,   min(total_films/50*100,100)),
+        ("f100",  "🍿", "Cent films",           "100 films vus !",                                                     total_films >= 100,  min(total_films/100*100,100)),
+        ("f250",  "🏅", "Amoureux du 7ème art", "250 films vus — une belle cinémathèque",                              total_films >= 250,  min(total_films/250*100,100)),
+        ("f500",  "🎭", "Véritable cinéphile",  "500 films différents vus",                                            total_films >= 500,  min(total_films/500*100,100)),
+        ("f1000", "🎪", "Maître du grand écran","1000 films, impressionnant !",                                        total_films >= 1000, min(total_films/1000*100,100)),
+
+        # -- Series --
+        ("s1",    "📺", "Premier épisode",      "Ton tout premier épisode vu",                                         total_eps >= 1,      min(total_eps/1*100,100)),
+        ("s10",   "📡", "Dix épisodes",         "10 épisodes vus",                                                     total_eps >= 10,     min(total_eps/10*100,100)),
+        ("s100",  "📶", "Cent épisodes",        "100 épisodes vus",                                                    total_eps >= 100,    min(total_eps/100*100,100)),
+        ("s500",  "💻", "Accro aux séries",     "500 épisodes — les séries n'ont plus de secrets pour toi",            total_eps >= 500,    min(total_eps/500*100,100)),
+        ("s1000", "🔥", "Mille épisodes",       "1000 épisodes ! Une belle performance",                               total_eps >= 1000,   min(total_eps/1000*100,100)),
+        ("s2500", "🚀", "Marathonien TV",       "2500 épisodes — tu vis littéralement devant les séries",              total_eps >= 2500,   min(total_eps/2500*100,100)),
+        ("s5000", "🏯", "Forteresse de canapé", "5000 épisodes — rien ne t'arrête",                                    total_eps >= 5000,   min(total_eps/5000*100,100)),
+
+        # -- Series suivies --
+        ("sv1",   "✅", "Une série terminée",   "Au moins 10 épisodes vus d'une même série",                           series_10ep >= 1,    min(series_10ep/1*100,100)),
+        ("sv5",   "💪", "Cinq séries suivies",  "Tu as vu 10+ épisodes de 5 séries différentes",                       series_10ep >= 5,    min(series_10ep/5*100,100)),
+        ("sv10",  "📚", "Dix séries suivies",   "10 séries dont tu as vu plus de 10 épisodes",                         series_10ep >= 10,   min(series_10ep/10*100,100)),
+        ("sv50",  "💎", "Fan inconditionnel",   "Une série avec plus de 50 épisodes vus",                              series_50ep >= 1,    min(series_50ep/1*100,100)),
+
+        # -- Marathons --
+        ("mar4",  "🏃", "Marathonien",          "4+ épisodes d'une même série en 1 jour",                              rec_jour >= 4,       min(rec_jour/4*100,100)),
+        ("mar8",  "⚡", "Marathon éclair",      "8+ épisodes en une seule journée",                                    rec_jour >= 8,       min(rec_jour/8*100,100)),
+        ("mar12", "🚄", "Train fou",            "12+ épisodes en 1 jour — ça c'est du binge !",                        rec_jour >= 12,      min(rec_jour/12*100,100)),
+
+        # -- Diversite --
+        ("divg",  "🌈", "Explorateur de genres","Tu as touché à au moins 10 genres différents",                        nb_genres >= 10,     min(nb_genres/10*100,100)),
+        ("diva",  "🕰️", "Voyageur temporel",    "Tu as vu des contenus de 20 années de sortie différentes",            nb_annees >= 20,     min(nb_annees/20*100,100)),
+        ("diva3", "🗿", "Amateur de classiques","Des contenus de 40 années différentes — du vieux au neuf !",          nb_annees >= 40,     min(nb_annees/40*100,100)),
+
+        # -- Nocturne --
+        ("nuit",  "🌙", "Oiseau de nuit",       "Plus de 20 visionnages entre minuit et 5h du matin",                  vues_nuit >= 20,     min(vues_nuit/20*100,100)),
+        ("nuit2", "🦉", "Chouette cinéphile",   "Plus de 100 visionnages nocturnes",                                   vues_nuit >= 100,    min(vues_nuit/100*100,100)),
+
+        # -- Global --
+        ("all1",  "👶", "Nouveau venu",         "Ton tout premier visionnage sur Trakt",                               total_vues >= 1,     min(total_vues/1*100,100)),
+        ("all100","⭐", "Cent visionnages",     "100 visionnages au total (films + épisodes)",                         total_vues >= 100,   min(total_vues/100*100,100)),
+        ("all1k", "🌟", "Mille visionnages",    "1000 visionnages, belle courbe de progression !",                     total_vues >= 1000,  min(total_vues/1000*100,100)),
+        ("all5k", "💫", "Cinq mille",           "5000 visionnages, une véritable habitude",                            total_vues >= 5000,  min(total_vues/5000*100,100)),
+        ("all10k","🪽", "Dix mille",            "10 000 visionnages — c'est de la passion à ce niveau",                total_vues >= 10000, min(total_vues/10000*100,100)),
+    ]
+
+    obtenus = [b for b in badges if b[4]]
+    locks   = [b for b in badges if not b[4]]
+
+    st.markdown(f"#### 🎖️ Badges obtenus ({len(obtenus)}/{len(badges)})")
+    if obtenus:
+        cols = st.columns(min(4, len(obtenus)))
+        for i,(_,em,titre,desc,_,_) in enumerate(obtenus):
+            with cols[i%4]:
+                st.markdown(f"""
+                <div class="badge-obtenu">
+                    <div class="emoji">{em}</div>
+                    <div class="titre">{titre}</div>
+                    <div class="desc">{desc}</div>
+                </div>
+                """, unsafe_allow_html=True)
     else:
         st.info("Continue de regarder des contenus pour gagner tes premiers badges !")
+
+    if locks:
+        st.divider()
+        st.markdown(f"#### 🔒 Prochains badges à décrocher ({len(locks)})")
+        st.caption("Voici les badges que tu n'as pas encore, triés avec les plus proches en premier.")
+        # Trier les locks par progression decroissante (les plus proches d'etre debloques d'abord)
+        locks = sorted(locks, key=lambda b: -b[5])
+        cols = st.columns(min(4, len(locks)))
+        for i,(_,em,titre,desc,_,prog) in enumerate(locks):
+            with cols[i%4]:
+                st.markdown(f"""
+                <div class="badge-lock">
+                    <div class="emoji">{em}</div>
+                    <div class="titre">{titre}</div>
+                    <div class="desc">{desc}</div>
+                    <div class="prog-badge"><div class="prog-badge-fill" style="width:{round(prog,1)}%"></div></div>
+                </div>
+                """, unsafe_allow_html=True)
+
 
 def page_stats(utz):
     if bloc_lancement(): return
