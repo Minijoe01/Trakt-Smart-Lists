@@ -496,15 +496,31 @@ def qrcode_img(url):
     return b.getvalue()
 
 def image_tmdb(tmdb_id, type_c="movie"):
+    """Retourne l'URL du poster TMDB, avec cache pour eviter de rappeler l'API 200 fois.
+    Timeout court et fallback gracieux si TMDB ne repond pas."""
     if not TMDB_KEY or not tmdb_id: return None
+    # Cache par instance pour eviter 100 appels identiques
+    cache_key = ("img", type_c, tmdb_id)
+    if cache_key in st.session_state.get("_img_cache", {}):
+        return st.session_state["_img_cache"][cache_key]
+    url = None
     try:
-        r = requests.get(f"https://api.themoviedb.org/3/{type_c}/{tmdb_id}", params={"api_key":TMDB_KEY}, timeout=5)
+        r = requests.get(
+            f"https://api.themoviedb.org/3/{type_c}/{tmdb_id}",
+            params={"api_key": TMDB_KEY},
+            timeout=2.5
+        )
         if r.status_code == 200:
             p = r.json().get("poster_path")
-            return f"https://image.tmdb.org/t/p/w200{p}" if p else None
+            if p:
+                url = f"https://image.tmdb.org/t/p/w200{p}"
     except Exception:
-        return None
-    return None
+        pass
+    # Mettre en cache (None aussi pour ne pas reessayer un id qui echoue)
+    if "_img_cache" not in st.session_state:
+        st.session_state["_img_cache"] = {}
+    st.session_state["_img_cache"][cache_key] = url
+    return url
 
 def appliquer_filtres_periode(df, mt, periode):
     if periode == "Cette année":
@@ -945,12 +961,14 @@ def entete():
         c1,c2,c3 = st.columns(3)
         with c1:
             if st.button("🔄 Analyse rapide", use_container_width=True):
-                for k in ["res","stats","doub","doub_det","pb","np","_xl_cache"]:
+                for k in ["res","stats","doub","doub_det","pb","np","_xl_cache",
+                          "_cal_items","_cal_last_key"]:
                     st.session_state.pop(k, None)
                 lancer_analyse(False, st.session_state["page_active"])
         with c2:
             if st.button("🔃 Rafraîchir tout", use_container_width=True):
-                for k in ["historique","res","stats","doub","doub_det","pb","np","infos","_xl_cache"]:
+                for k in ["historique","res","stats","doub","doub_det","pb","np","infos","_xl_cache",
+                          "_cal_items","_cal_last_key","_img_cache"]:
                     st.session_state.pop(k, None)
                 st.rerun()
         with c3:
@@ -1366,129 +1384,142 @@ def page_calendrier(utz):
     choix_label = st.selectbox("📋 Liste à explorer", [l[0] for l in listes_dispo], key="cal_liste")
     lid_nom = dict(listes_dispo)[choix_label]
 
-    with st.spinner("Récupération du calendrier..."):
-        if lid_nom == "__ALL__":
-            items = []
+    # CACHE : on ne recharge les items que si la liste selectionnee change
+    # (pas a chaque changement de filtre / rerender)
+    cache_key_cal = ("cal_items", lid_nom)
+    if st.session_state.get("_cal_last_key") != cache_key_cal:
+        with st.spinner("Récupération du calendrier..."):
             try:
-                items.extend(recuperer_watchlist(at))
-            except Exception:
-                pass
-            try:
-                for l in recuperer_listes(at):
+                if lid_nom == "__ALL__":
+                    items = []
                     try:
-                        items.extend(recuperer_contenu_liste(at, l["ids"]["trakt"]))
+                        items.extend(recuperer_watchlist(at))
                     except Exception:
                         pass
-            except Exception:
-                pass
-        elif lid_nom == "watchlist":
-            items = recuperer_watchlist(at)
-        else:
-            l_id = None
-            try:
-                for l in recuperer_listes(at):
-                    if l["name"] == lid_nom:
-                        l_id = l["ids"]["trakt"]; break
-            except Exception:
-                pass
-            items = recuperer_contenu_liste(at, l_id) if l_id else recuperer_watchlist(at)
-
-        # Dédoublonner (un même film/série peut être dans plusieurs listes)
-        vus = set()
-        items_uniques = []
-        for it in items:
-            if it["type"] == "movie":
-                cle = ("movie", it["movie"]["ids"]["trakt"])
-            elif it["type"] == "show":
-                cle = ("show", it["show"]["ids"]["trakt"])
-            else:
-                continue
-            if cle in vus: continue
-            vus.add(cle)
-            items_uniques.append(it)
-        items = items_uniques
-
-        mt = datetime.now(utz)
-        sorties = []
-        for it in items:
-            date_sortie = None
-            status = ""
-            if it["type"] == "movie":
-                med = it["movie"]
-                titre = med.get("title","")
-                annee = med.get("year")
-                genre = ", ".join(med.get("genres") or [])
-                note = med.get("rating") or 0
-                tmdb = med["ids"].get("tmdb")
-                date_sortie = med.get("released")
-                typ = "Film"
-            elif it["type"] == "show":
-                med = it["show"]
-                titre = med.get("title","")
-                annee = med.get("year")
-                genre = ", ".join(med.get("genres") or [])
-                note = med.get("rating") or 0
-                tmdb = med["ids"].get("tmdb")
-                status = med.get("status","")
-                typ = "Série"
-            else:
-                continue
-
-            ds = None
-            j_restant = None
-            label = ""
-            if date_sortie:
-                try:
-                    ds = datetime.strptime(date_sortie, "%Y-%m-%d").replace(tzinfo=utz)
-                    j_restant = (ds - mt).days
-                    if j_restant < 0:
-                        label = "Déjà disponible"
-                    elif j_restant == 0:
-                        label = "AUJOURD'HUI"
-                    elif j_restant <= 7:
-                        label = "Cette semaine"
-                    elif j_restant <= 30:
-                        label = "Ce mois"
-                    elif j_restant <= 90:
-                        label = f"Dans {j_restant}j"
-                    elif j_restant <= 365:
-                        label = ds.strftime("%B %Y")
-                    else:
-                        label = f"{annee or '?'}"
-                except Exception:
-                    ds = None
-            else:
-                if typ == "Série":
-                    nb_ep = med.get("aired_episodes") or 0
-                    if status in ("ended", "canceled"):
-                        label = "Déjà disponible"
-                        j_restant = -1
-                    elif status in ("returning", "continuing"):
-                        if nb_ep > 0:
-                            label = "En cours (disponible)"
-                            j_restant = -1
-                        else:
-                            label = "Prochainement"
-                            j_restant = 999999
-                    elif status in ("in production", "planned", "pilot"):
-                        label = f"{annee}" if annee and annee >= mt.year else "Prochainement"
-                        j_restant = 999999
-                    else:
-                        label = "Déjà disponible" if nb_ep > 0 else "Prochainement"
-                        j_restant = -1 if nb_ep > 0 else 999999
+                    try:
+                        for l in recuperer_listes(at):
+                            try:
+                                items.extend(recuperer_contenu_liste(at, l["ids"]["trakt"]))
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+                elif lid_nom == "watchlist":
+                    items = recuperer_watchlist(at)
                 else:
-                    if annee and annee > mt.year:
-                        label = str(annee)
-                        j_restant = 999999
+                    l_id = None
+                    try:
+                        for l in recuperer_listes(at):
+                            if l["name"] == lid_nom:
+                                l_id = l["ids"]["trakt"]; break
+                    except Exception:
+                        pass
+                    items = recuperer_contenu_liste(at, l_id) if l_id else []
+
+                # Dédoublonner
+                vus = set()
+                items_uniques = []
+                for it in items:
+                    if it["type"] == "movie":
+                        cle = ("movie", it["movie"]["ids"]["trakt"])
+                    elif it["type"] == "show":
+                        cle = ("show", it["show"]["ids"]["trakt"])
                     else:
-                        label = "Déjà disponible"
+                        continue
+                    if cle in vus: continue
+                    vus.add(cle)
+                    items_uniques.append(it)
+                st.session_state["_cal_items"] = items_uniques
+                st.session_state["_cal_last_key"] = cache_key_cal
+            except Exception as e:
+                st.error(f"Erreur pendant la récupération du calendrier : {e}")
+                st.info("Réessaie en cliquant sur 🔃 Rafraîchir tout.")
+                return
+    items = st.session_state.get("_cal_items", [])
+
+    # Une fois les items en cache, les filtres et le tri se font EN MEMOIRE, sans appel API
+    mt = datetime.now(utz)
+    sorties = []
+    for it in items:
+        date_sortie = None
+        status = ""
+        if it["type"] == "movie":
+            med = it["movie"]
+            titre = med.get("title","")
+            annee = med.get("year")
+            genre = ", ".join(med.get("genres") or [])
+            note = med.get("rating") or 0
+            tmdb = med["ids"].get("tmdb")
+            date_sortie = med.get("released")
+            typ = "Film"
+        elif it["type"] == "show":
+            med = it["show"]
+            titre = med.get("title","")
+            annee = med.get("year")
+            genre = ", ".join(med.get("genres") or [])
+            note = med.get("rating") or 0
+            tmdb = med["ids"].get("tmdb")
+            status = med.get("status","")
+            typ = "Série"
+        else:
+            continue
+
+        ds = None
+        j_restant = None
+        label = ""
+        if date_sortie:
+            try:
+                ds = datetime.strptime(date_sortie, "%Y-%m-%d").replace(tzinfo=utz)
+                j_restant = (ds - mt).days
+                if j_restant < 0:
+                    label = "Déjà disponible"
+                elif j_restant == 0:
+                    label = "AUJOURD'HUI"
+                elif j_restant <= 7:
+                    label = "Cette semaine"
+                elif j_restant <= 30:
+                    label = "Ce mois"
+                elif j_restant <= 90:
+                    label = f"Dans {j_restant}j"
+                elif j_restant <= 365:
+                    label = ds.strftime("%B %Y")
+                else:
+                    label = f"{annee or '?'}"
+            except Exception:
+                ds = None
+        else:
+            if typ == "Série":
+                nb_ep = med.get("aired_episodes") or 0
+                if status in ("ended", "canceled"):
+                    label = "Déjà disponible"
+                    j_restant = -1
+                elif status in ("returning", "continuing"):
+                    if nb_ep > 0:
+                        label = "En cours (disponible)"
                         j_restant = -1
-            img = image_tmdb(tmdb, "movie" if typ=="Film" else "tv")
-            sorties.append({
-                "type": typ, "titre": titre, "annee": annee, "note": note,
-                "genre": genre or "Inconnu", "date": ds, "j_restant": j_restant,
-                "label": label, "img": img, "status": status if typ=="Série" else ""
-            })
+                    else:
+                        label = "Prochainement"
+                        j_restant = 999999
+                elif status in ("in production", "planned", "pilot"):
+                    label = f"{annee}" if annee and annee >= mt.year else "Prochainement"
+                    j_restant = 999999
+                else:
+                    label = "Déjà disponible" if nb_ep > 0 else "Prochainement"
+                    j_restant = -1 if nb_ep > 0 else 999999
+            else:
+                if annee and annee > mt.year:
+                    label = str(annee)
+                    j_restant = 999999
+                else:
+                    label = "Déjà disponible"
+                    j_restant = -1
+        # Les images sont chargees a la VOLEE au moment de l'affichage, avec cache
+        img = image_tmdb(tmdb, "movie" if typ=="Film" else "tv") if tmdb else None
+        sorties.append({
+            "type": typ, "titre": titre, "annee": annee, "note": note,
+            "genre": genre or "Inconnu", "date": ds, "j_restant": j_restant,
+            "label": label, "img": img, "status": status if typ=="Série" else ""
+        })
 
     cf1, cf2, cf3 = st.columns(3)
     with cf1:
@@ -1567,7 +1598,10 @@ def page_calendrier(utz):
                 ci, cd = st.columns([0.10, 0.90])
                 with ci:
                     if r.get("img"):
-                        st.image(r["img"], use_container_width=True)
+                        try:
+                            st.image(r["img"], use_container_width=True)
+                        except Exception:
+                            st.markdown("🎬" if r["type"]=="Film" else "📺")
                     else:
                         st.markdown("🎬" if r["type"]=="Film" else "📺")
                 with cd:
