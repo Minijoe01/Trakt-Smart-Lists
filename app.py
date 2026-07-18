@@ -1353,10 +1353,171 @@ def page_fantomes(utz):
 def page_calendrier(utz):
     if bloc_lancement(): return
     st.subheader("📅 Calendrier des sorties")
-    st.markdown("""
-    <div style="background: rgba(0,102,95,0.35); border:1px solid rgba(0,163,146,0.3); border-radius:14px; padding:22px; color:#F0FAF8;">
-    🚧 Prochainement.
-    </div>""", unsafe_allow_html=True)
+    st.caption("Les prochaines sorties attendues des films et séries de ta liste de suivi.")
+    at = st.session_state["access_token"]
+
+    with st.spinner("Récupération du calendrier..."):
+        items = recuperer_watchlist(at)
+        mt = datetime.now(utz)
+        sorties = []
+        for it in items:
+            if it["type"] == "movie":
+                med = it["movie"]
+                titre = med.get("title","")
+                annee = med.get("year")
+                genre = ", ".join(med.get("genres") or [])
+                note = med.get("rating") or 0
+                tmdb = med["ids"].get("tmdb")
+                # released = la date de sortie cinema
+                date_sortie = med.get("released")
+                typ = "Film"
+            elif it["type"] == "show":
+                med = it["show"]
+                titre = med.get("title","")
+                annee = med.get("year")
+                genre = ", ".join(med.get("genres") or [])
+                note = med.get("rating") or 0
+                tmdb = med["ids"].get("tmdb")
+                # Pour les series, on prend l'annee de la prochaine saison si dispo
+                # Trakt ne donne pas toujours la date exacte dans l'extended, on se base sur year/status
+                date_sortie = None
+                # Premier essai : aired_episodes vs status
+                airs = med.get("airs") or {}
+                status = med.get("status","")
+                typ = "Série"
+            else:
+                continue
+
+            # Formatage date
+            ds = None
+            j_restant = None
+            label = ""
+            if date_sortie:
+                try:
+                    ds = datetime.strptime(date_sortie, "%Y-%m-%d").replace(tzinfo=utz)
+                    j_restant = (ds - mt).days
+                    if j_restant < 0:
+                        label = "Déjà disponible"
+                    elif j_restant == 0:
+                        label = "AUJOURD'HUI"
+                    elif j_restant <= 7:
+                        label = f"Cette semaine ({j_restant}j)"
+                    elif j_restant <= 30:
+                        label = f"Ce mois ({j_restant}j)"
+                    elif j_restant <= 90:
+                        label = f"Dans {j_restant}j"
+                    elif j_restant <= 365:
+                        label = ds.strftime("%B %Y")
+                    else:
+                        label = f"{annee or '?'}"
+                except Exception:
+                    ds = None
+            else:
+                # Pas de date precise : afficher l'annee si elle est future
+                if annee and annee >= mt.year:
+                    label = str(annee)
+                    j_restant = 999999
+                else:
+                    if typ == "Série" and status in ("returning", "in production", "planned"):
+                        label = "Prochainement"
+                        j_restant = 999999
+                    else:
+                        label = "Déjà disponible"
+                        j_restant = -1
+            img = image_tmdb(tmdb, "movie" if typ=="Film" else "tv")
+            sorties.append({
+                "type": typ, "titre": titre, "annee": annee, "note": note,
+                "genre": genre or "Inconnu", "date": ds, "j_restant": j_restant,
+                "label": label, "img": img, "status": status if typ=="Série" else ""
+            })
+
+    # Filtres
+    cf1, cf2, cf3 = st.columns(3)
+    with cf1:
+        f_type = st.selectbox("Type", ["Tous", "Films", "Séries"])
+    with cf2:
+        f_delai = st.selectbox("Délai", ["Toutes les sorties", "Bientôt (< 3 mois)", "Ce mois-ci", "Cette semaine", "Aujourd'hui", "Déjà disponibles"])
+    with cf3:
+        f_tri = st.selectbox("Trier par", ["Date (proche → loin)", "Note (meilleure d'abord)", "Titre A→Z"])
+
+    # Filtrage
+    df = pd.DataFrame(sorties)
+    if f_type == "Films": df = df[df["type"]=="Film"]
+    if f_type == "Séries": df = df[df["type"]=="Série"]
+
+    if f_delai == "Bientôt (< 3 mois)":
+        df = df[(df["j_restant"] >= 0) & (df["j_restant"] <= 92)]
+    elif f_delai == "Ce mois-ci":
+        df = df[(df["j_restant"] >= 0) & (df["j_restant"] <= 31)]
+    elif f_delai == "Cette semaine":
+        df = df[(df["j_restant"] >= 0) & (df["j_restant"] <= 7)]
+    elif f_delai == "Aujourd'hui":
+        df = df[df["j_restant"] == 0]
+    elif f_delai == "Déjà disponibles":
+        df = df[df["j_restant"] < 0]
+
+    if f_tri == "Date (proche → loin)":
+        df["tri_key"] = df["j_restant"].apply(lambda x: -999999 if x < 0 else x)
+        df = df.sort_values("tri_key")
+    elif f_tri == "Note (meilleure d'abord)":
+        df = df.sort_values("note", ascending=False)
+    else:
+        df = df.sort_values("titre")
+
+    st.markdown(f"**{len(df)}** contenu(s) dans le calendrier.")
+    st.divider()
+
+    if df.empty:
+        st.markdown("""
+        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:18px; color:#F0FAF8; text-align:center;">
+        🎬 Aucune sortie ne correspond à tes filtres.
+        </div>""", unsafe_allow_html=True)
+        return
+
+    # Groupement par label pour les sorties a venir
+    groupes = {}
+    for _, r in df.iterrows():
+        groupes.setdefault(r["label"], []).append(r)
+
+    # Ordre d'affichage : aujourd'hui, cette semaine, ce mois, puis dans l'ordre de date
+    ordre = ["AUJOURD'HUI", "Cette semaine (7j)", "Cette semaine", "Ce mois", "Ce mois-ci", "Bientôt",
+             "Déjà disponible"]
+    labels_ord = sorted(groupes.keys(), key=lambda x: (
+        ordre.index(x) if x in ordre else 100,
+        0 if x == "Déjà disponible" else 1
+    ))
+    if "Déjà disponible" in labels_ord:
+        labels_ord = [l for l in labels_ord if l != "Déjà disponible"] + ["Déjà disponible"]
+
+    for lab in labels_ord:
+        groupe = groupes[lab]
+        st.markdown(f"### {lab} ({len(groupe)})")
+        for _, r in pd.DataFrame(groupe).iterrows():
+            with st.container(border=True):
+                ci, cd = st.columns([0.10, 0.90])
+                with ci:
+                    if r["img"]:
+                        st.image(r["img"], use_container_width=True)
+                    else:
+                        st.markdown("🎬" if r["type"]=="Film" else "📺")
+                with cd:
+                    an = f" ({r['annee']})" if pd.notna(r["annee"]) else ""
+                    st.markdown(f"**{r['type']} — {r['titre']}**{an}")
+                    note_txt = f"⭐ {r['note']:.1f}/10" if r["note"] else ""
+                    if r["date"] is not None and pd.notna(r["date"]):
+                        date_txt = r["date"].strftime("%d/%m/%Y")
+                        jrest = r["j_restant"]
+                        if jrest == 0: jtxt = "🎉 Aujourd'hui !"
+                        elif jrest < 0: jtxt = "✅ Disponible"
+                        else: jtxt = f"Dans {jrest} jours"
+                        st.caption(f"📅 Sortie le {date_txt} · {jtxt} · 🎭 {r['genre']} · {note_txt}")
+                    else:
+                        extra = ""
+                        if r["type"]=="Série" and r["status"]:
+                            extra_map = {"returning":"🔄 En cours", "in production":"🎬 En production", "planned":"📋 Planifiée", "canceled":"❌ Annulée", "ended":"✅ Terminée"}
+                            extra = " · " + extra_map.get(r["status"], r["status"])
+                        st.caption(f"📅 {lab} · 🎭 {r['genre']} · {note_txt}{extra}")
+
 
 def page_succes(utz):
     if bloc_lancement(): return
@@ -2190,6 +2351,7 @@ def page_quoi_regarder(utz):
 
 
 def page_wrapped():
+    if bloc_lancement(): return
     st.subheader("🎬 Rendez-vous annuel")
     st.caption("Ton récapitulatif annuel façon Wrapped. Sélectionne une année pour revivre ton année de visionnage.")
 
@@ -2312,102 +2474,106 @@ def page_wrapped():
 
 def page_sauvegarde():
     st.subheader("📤 Sauvegarde et restauration")
-    st.caption("Exporte toutes tes données (listes, historique, paramètres) dans un fichier JSON que tu peux conserver précieusement, ou restaure-les depuis un fichier précédent.")
-    if bloc_lancement(): return
+    st.caption("Restaure une sauvegarde précédente, ou exporte tes données après analyse.")
 
     at = st.session_state["access_token"]
-    h = st.session_state["historique"]
-    res = st.session_state.get("res", [])
-    stats = st.session_state.get("stats", [])
-    doub = st.session_state.get("doub", [])
-    pb = st.session_state.get("pb", [])
-    infos = st.session_state.get("infos", {})
-    pseudo = infos.get("pseudo", "utilisateur")
-    utz = infos.get("tz")
 
-    cexp, cimp = st.columns(2)
-
-    with cexp:
-        st.markdown("#### 📤 Exporter mes données")
-        st.markdown("Télécharge un fichier JSON contenant :")
-        st.markdown("- ✅ Ton historique de visionnage détaillé")
-        st.markdown("- ✅ Tes statistiques de listes")
-        st.markdown("- ✅ Tes doublons détectés")
-        st.markdown("- ✅ Tes progressions fantômes")
-        st.markdown("- ✅ Tes contenus à nettoyer")
-        st.markdown("- ✅ La date d'export et ton pseudo")
-
-        if st.button("📥 Générer la sauvegarde", use_container_width=True):
-            sauvegarde = {
-                "version": 1,
-                "export_date": datetime.now(utz).isoformat() if utz else datetime.now().isoformat(),
-                "pseudo": pseudo,
-                "historique": h,
-                "stats_listes": stats,
-                "a_nettoyer": res,
-                "doublons": doub,
-                "doublons_det": st.session_state.get("doub_det", []),
-                "fantomes": pb,
-            }
+    # PARTIE RESTAURATION : accessible SANS analyse
+    st.markdown("#### 📥 Importer une sauvegarde")
+    st.markdown("""
+    <div style="background: rgba(206,220,0,0.12); border:1px solid rgba(206,220,0,0.35); border-radius:12px; padding:12px; color:#F0FAF8; font-size:0.9em; margin-bottom:12px;">
+    ⚠️ L'import ne modifie PAS tes données sur Trakt, il recharge simplement les données dans l'application pour éviter une nouvelle analyse.
+    </div>""", unsafe_allow_html=True)
+    fichier = st.file_uploader("Choisis un fichier JSON", type=["json"])
+    if fichier is not None:
+        try:
             import json
-            data_json = json.dumps(sauvegarde, ensure_ascii=False, indent=2, default=str)
-            st.download_button(
-                "💾 Télécharger la sauvegarde JSON",
-                data=data_json.encode("utf-8"),
-                file_name=f"trakt_backup_{pseudo}_{datetime.now().strftime('%Y%m%d')}.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-
-    with cimp:
-        st.markdown("#### 📥 Importer une sauvegarde")
-        st.markdown("Restaure tes données depuis un fichier JSON exporté précédemment.")
-        st.markdown("""
-        <div style="background: rgba(206,220,0,0.12); border:1px solid rgba(206,220,0,0.35); border-radius:12px; padding:12px; color:#F0FAF8; font-size:0.9em; margin-bottom:12px;">
-        ⚠️ L'import ne modifie PAS tes données sur Trakt, il recharge simplement les données dans l'application pour éviter une nouvelle analyse.
-        </div>""", unsafe_allow_html=True)
-        fichier = st.file_uploader("Choisis un fichier JSON", type=["json"])
-        if fichier is not None:
-            try:
-                import json
-                data = json.load(fichier)
-                if data.get("version") == 1:
-                    st.markdown(f"""
-                    <div style="background: rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:12px; padding:12px; color:#F0FAF8;">
-                    ✅ Sauvegarde valide ! Pseudo : <b>{data.get('pseudo','inconnu')}</b> • Export du {data.get('export_date','?')}
-                    </div>""", unsafe_allow_html=True)
-                    if st.button("🔄 Restaurer dans l'application", type="primary", use_container_width=True):
-                        if data.get("historique"): st.session_state["historique"] = data["historique"]
-                        if data.get("stats_listes"): st.session_state["stats"] = data["stats_listes"]
-                        if data.get("a_nettoyer"): st.session_state["res"] = data["a_nettoyer"]
-                        if data.get("doublons"): st.session_state["doub"] = data["doublons"]
-                        if data.get("doublons_det"): st.session_state["doub_det"] = data["doublons_det"]
-                        if data.get("fantomes"): st.session_state["pb"] = data["fantomes"]
-                        try:
-                            st.session_state["np"] = recuperer_lecture(at)
-                        except Exception:
-                            pass
-                        st.markdown("""
-                        <div style="background: rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:12px; padding:12px; color:#F0FAF8;">
-                        ✅ Données restaurées dans l'application !
-                        </div>""", unsafe_allow_html=True)
-                        st.rerun()
-                else:
-                    st.markdown("""
-                    <div style="background: rgba(237,34,36,0.12); border:1px solid rgba(237,34,36,0.35); border-radius:12px; padding:12px; color:#F0FAF8;">
-                    ❌ Format de sauvegarde non reconnu.
-                    </div>""", unsafe_allow_html=True)
-            except Exception as e:
+            data = json.load(fichier)
+            if data.get("version") == 1:
                 st.markdown(f"""
-                <div style="background: rgba(237,34,36,0.12); border:1px solid rgba(237,34,36,0.35); border-radius:12px; padding:12px; color:#F0FAF8;">
-                ❌ Erreur lors de la lecture du fichier : {e}
+                <div style="background: rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:12px; padding:12px; color:#F0FAF8;">
+                ✅ Sauvegarde valide ! Pseudo : <b>{data.get('pseudo','inconnu')}</b> • Export du {data.get('export_date','?')}
                 </div>""", unsafe_allow_html=True)
+                if st.button("🔄 Restaurer dans l'application", type="primary", use_container_width=True):
+                    if data.get("historique"): st.session_state["historique"] = data["historique"]
+                    if data.get("stats_listes"): st.session_state["stats"] = data["stats_listes"]
+                    if data.get("a_nettoyer"): st.session_state["res"] = data["a_nettoyer"]
+                    if data.get("doublons"): st.session_state["doub"] = data["doublons"]
+                    if data.get("doublons_det"): st.session_state["doub_det"] = data["doublons_det"]
+                    if data.get("fantomes"): st.session_state["pb"] = data["fantomes"]
+                    try:
+                        st.session_state["np"] = recuperer_lecture(at)
+                    except Exception:
+                        pass
+                    st.markdown("""
+                    <div style="background: rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:12px; padding:12px; color:#F0FAF8;">
+                    ✅ Données restaurées dans l'application !
+                    </div>""", unsafe_allow_html=True)
+                    st.rerun()
+            else:
+                st.markdown("""
+                <div style="background: rgba(237,34,36,0.12); border:1px solid rgba(237,34,36,0.35); border-radius:12px; padding:12px; color:#F0FAF8;">
+                ❌ Format de sauvegarde non reconnu.
+                </div>""", unsafe_allow_html=True)
+        except Exception as e:
+            st.markdown(f"""
+            <div style="background: rgba(237,34,36,0.12); border:1px solid rgba(237,34,36,0.35); border-radius:12px; padding:12px; color:#F0FAF8;">
+            ❌ Erreur lors de la lecture du fichier : {e}
+            </div>""", unsafe_allow_html=True)
+
+    st.divider()
+
+    # PARTIE EXPORT : necessite l'analyse
+    st.markdown("#### 📤 Exporter mes données")
+    if bloc_lancement():
+        st.markdown("""
+        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:14px 18px; color:#9DC5BF; font-size:0.95em; margin-top:12px;">
+        ℹ️ Une fois l'analyse lancée, tu pourras exporter toutes tes données (historique, listes, statistiques) en JSON.
+        </div>""", unsafe_allow_html=True)
+        return
+
+    st.markdown("Télécharge un fichier JSON contenant :")
+    st.markdown("- ✅ Ton historique de visionnage détaillé")
+    st.markdown("- ✅ Tes statistiques de listes")
+    st.markdown("- ✅ Tes doublons détectés")
+    st.markdown("- ✅ Tes progressions fantômes")
+    st.markdown("- ✅ Tes contenus à nettoyer")
+
+    if st.button("📥 Générer la sauvegarde", use_container_width=True):
+        h = st.session_state["historique"]
+        res = st.session_state.get("res", [])
+        stats = st.session_state.get("stats", [])
+        doub = st.session_state.get("doub", [])
+        pb = st.session_state.get("pb", [])
+        infos = st.session_state.get("infos", {})
+        pseudo = infos.get("pseudo", "utilisateur")
+        utz = infos.get("tz")
+        sauvegarde = {
+            "version": 1,
+            "export_date": datetime.now(utz).isoformat() if utz else datetime.now().isoformat(),
+            "pseudo": pseudo,
+            "historique": h,
+            "stats_listes": stats,
+            "a_nettoyer": res,
+            "doublons": doub,
+            "doublons_det": st.session_state.get("doub_det", []),
+            "fantomes": pb,
+        }
+        import json
+        data_json = json.dumps(sauvegarde, ensure_ascii=False, indent=2, default=str)
+        st.download_button(
+            "💾 Télécharger la sauvegarde JSON",
+            data=data_json.encode("utf-8"),
+            file_name=f"trakt_backup_{pseudo}_{datetime.now().strftime('%Y%m%d')}.json",
+            mime="application/json",
+            use_container_width=True,
+        )
 
     st.divider()
     st.markdown("#### ℹ️ À savoir")
     st.markdown("""
     <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:14px 18px; color:#F0FAF8; font-size:0.95em;">
-    Tes identifiants et tokens d'authentification ne sont JAMAIS inclus dans la sauvegarde pour des raisons de sécurité. Tu devras rester connecté après un refresh, et l'application refera simplement une récupération des données live (listes/playbacks) la prochaine fois si tu fais une analyse rapide.
+    Tes identifiants et tokens d'authentification ne sont JAMAIS inclus dans la sauvegarde pour des raisons de sécurité.
     </div>""", unsafe_allow_html=True)
 
 # ==================================================
