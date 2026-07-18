@@ -59,7 +59,8 @@ st.markdown("""
         --am-green: #00A392;
         --am-green-aston: #00524B;
         --am-green-dark: #021412;
-        --am-lime: #00D084;
+        --am-lime: #CEDC00;   /* Jaune fluo Aston pour progress bars et accents */
+        --am-mint: #00D084;   /* Vert menthe pour les warnings/alertes */
         --am-bg-card: rgba(8, 55, 50, 0.75);
         --am-bg-card-hover: rgba(12, 75, 68, 0.85);
         --am-border: rgba(18, 90, 84, 0.5);
@@ -158,13 +159,13 @@ st.markdown("""
     }
     div.stSuccess svg, div[data-testid="stAlert"][kind="success"] svg { fill: var(--am-green) !important; }
 
-    /* WARNINGS : comme tu l'as demande, #00D084 */
+    /* WARNINGS : #00D084 UNIQUEMENT sur les warnings (fantomes, doublons, etc.) */
     div.stWarning, div[data-testid="stAlert"][kind="warning"] {
-        background: rgba(0,208,132,0.12) !important;
-        border-left: 4px solid #00D084 !important;
-        border: 1px solid rgba(0,208,132,0.35) !important;
+        background: rgba(0,208,132,0.15) !important;
+        border-left: 4px solid var(--am-mint) !important;
+        border: 1px solid rgba(0,208,132,0.4) !important;
     }
-    div.stWarning svg, div[data-testid="stAlert"][kind="warning"] svg { fill: #00D084 !important; }
+    div.stWarning svg, div[data-testid="stAlert"][kind="warning"] svg { fill: var(--am-mint) !important; }
 
     div.stError, div[data-testid="stAlert"][kind="error"] {
         background: rgba(237,34,36,0.10) !important;
@@ -288,17 +289,24 @@ st.markdown("""
 
     /* (Les styles des alertes sont definis plus haut, avec le warning #00D084) */
 
-    .stButton > button {
+    /* Tous les boutons : meme style, PAS D'OMBRE, meme aspect que le bouton Excel */
+    .stButton > button,
+    div[data-testid="stDownloadButton"] > button {
         font-weight: 600; padding: 0.7em 1.3em; color: var(--am-text) !important;
-        transition: all 0.25s ease;
-        background: rgba(3, 30, 27, 0.55) !important;
+        transition: all 0.2s ease;
+        background: rgba(3, 30, 27, 0.65) !important;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border-radius: 16px !important;
         border: 1px solid rgba(0,163,146,0.25) !important;
         box-shadow: none !important;
+        width: 100%;
     }
-    .stButton > button:hover {
-        background: rgba(12, 75, 68, 0.7) !important;
-        transform: translateY(-1px);
-        border-color: rgba(0,163,146,0.5) !important;
+    .stButton > button:hover,
+    div[data-testid="stDownloadButton"] > button:hover {
+        background: rgba(12, 75, 68, 0.75) !important;
+        border-color: rgba(0,163,146,0.45) !important;
+        box-shadow: none !important;
     }
     .stButton > button[kind="primary"] {
         background: linear-gradient(135deg, var(--am-green) 0%, var(--am-green-aston) 100%) !important;
@@ -306,24 +314,8 @@ st.markdown("""
         box-shadow: none !important;
     }
     .stButton > button[kind="primary"]:hover {
-        transform: translateY(-1px);
-    }
-
-    div[data-testid="stDownloadButton"] > button {
-        background: rgba(3, 30, 27, 0.55) !important;
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
-        border-radius: 16px !important;
-        border: 1px solid rgba(0,163,146,0.25) !important;
-        color: var(--am-text) !important;
-        font-weight: 600;
-        width: 100%;
-        padding: 0.7em 1.3em;
+        background: linear-gradient(135deg, #00B8A5 0%, #006058 100%) !important;
         box-shadow: none !important;
-    }
-    div[data-testid="stDownloadButton"] > button:hover {
-        background: rgba(12, 75, 68, 0.7) !important;
-        border-color: rgba(0,163,146,0.5) !important;
     }
 
     section[data-testid="stSidebar"] {
@@ -385,7 +377,7 @@ st.markdown("""
     .progress-bar-fill { height:100%; border-radius:8px; transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
     .progress-low { background: linear-gradient(90deg, var(--am-green-aston) 0%, var(--am-green) 100%); }
     .progress-mid { background: linear-gradient(90deg, var(--am-green) 0%, var(--am-lime) 100%); }
-    .progress-high { background: linear-gradient(90deg, var(--am-lime) 0%, #9CF5D3 100%); }
+    .progress-high { background: linear-gradient(90deg, var(--am-lime) 0%, #E8F064 100%); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1556,7 +1548,7 @@ def page_stats(utz):
     # Heures par mois
     df["mois"] = df["date_dt"].dt.strftime("%m-%Y")
     h_mois = df.groupby("mois")["duree_h"].sum().round(1).sort_index()
-    opt_m = {"title":{"text":"Heures par mois","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":list(h_mois.index),"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"line","smooth":True,"lineStyle":{"color":"#00D084","width":3},"areaStyle":{"color":"rgba(206,220,0,0.1)"},"itemStyle":{"color":"#00D084"}}]}
+    opt_m = {"title":{"text":"Heures par mois","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":list(h_mois.index),"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"line","smooth":True,"lineStyle":{"color":"#00D084","width":3},"areaStyle":{"color":"rgba(0,208,132,0.12)"},"itemStyle":{"color":"#00D084"}}]}
     st_echarts(opt_m, height="350px")
 
     g1,g2 = st.columns(2)
@@ -1567,7 +1559,7 @@ def page_stats(utz):
             for g in lg:
                 if g and g != "Inconnu":
                     genres_n[g] = genres_n.get(g,0) + 1
-        opt_g = {"title":{"text":"Genres les plus regardés (nombre de contenus)","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"name":k,"value":v} for k,v in sorted(genres_n.items(), key=lambda x:-x[1])[:8]],"itemStyle":{"borderRadius":8,"borderColor":"#042E2B","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#00D084","#00C7B3","#00A392","#00524B","#008477","#125A54","#9CF5D3"]}
+        opt_g = {"title":{"text":"Genres les plus regardés (nombre de contenus)","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"name":k,"value":v} for k,v in sorted(genres_n.items(), key=lambda x:-x[1])[:8]],"itemStyle":{"borderRadius":8,"borderColor":"#042E2B","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#CEDC00","#00C7B3","#00A392","#00524B","#008477","#125A54","#E8F064"]}
         st_echarts(opt_g, height="400px")
     with g2:
         df["h"] = df["date_dt"].dt.hour
@@ -1594,7 +1586,7 @@ def page_stats(utz):
     g5,g6 = st.columns(2)
     with g5:
         rt = df.groupby("type")["duree_h"].sum().round(1)
-        opt_t = {"title":{"text":"Films vs Séries","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item","formatter":"{b} : {c}h ({d}%)"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"value":v,"name":k} for k,v in rt.items()],"itemStyle":{"borderRadius":8,"borderColor":"#042E2B","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#00D084"]}
+        opt_t = {"title":{"text":"Films vs Séries","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item","formatter":"{b} : {c}h ({d}%)"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"value":v,"name":k} for k,v in rt.items()],"itemStyle":{"borderRadius":8,"borderColor":"#042E2B","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#CEDC00"]}
         st_echarts(opt_t, height="400px")
 
     with st.expander("📋 Détail des visionnages"):
@@ -1936,7 +1928,7 @@ def page_quoi_regarder(utz):
         s = r.get("status", "") or ""
         if f_statut == "Séries terminées": return s == "ended"
         if f_statut == "Séries en cours": return s in ("returning", "in production", "continuing")
-        if f_statut == "Séries annulées": return s in ("canceled", "ended")
+        if f_statut == "Séries annulées": return s == "canceled"
         if f_statut == "Pilot/En prod": return s in ("planned", "in production", "pilot")
         return True
 
@@ -1992,20 +1984,7 @@ def page_quoi_regarder(utz):
         filtrés.sort(key=lambda x: x["score"])
         sections = [("🙅 Contenus qui ne correspondent pas à mon profil", [r for r in filtrés if r["pas_pour_moi"]], "bad")]
 
-    st.markdown("""
-    <style>
-    .rec-card-rec { background: linear-gradient(135deg, rgba(0,163,146,0.18) 0%, rgba(0,82,75,0.30) 100%); border:1px solid rgba(0,163,146,0.35); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
-    .rec-card-mid { background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
-    .rec-card-bad { background: rgba(60,60,40,0.30); border:1px solid rgba(206,220,0,0.2); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
-    .rec-titre { font-size:1.15em; font-weight:700; color:#F0FAF8; margin-bottom:4px; }
-    .rec-meta { font-size:0.88em; color:#9DC5BF; margin-bottom:8px; }
-    .rec-score { font-size:1.6em; font-weight:800; color:#00D084; line-height:1; }
-    .rec-tag-ok { display:inline-block; padding:4px 11px; margin:3px 4px 3px 0; border-radius:12px; background:rgba(0,208,132,0.18); color:#7CE0B8; font-size:0.82em; font-weight:600; }
-    .rec-tag-warn { display:inline-block; padding:4px 11px; margin:3px 4px 3px 0; border-radius:12px; background:rgba(206,220,0,0.12); color:#00D084; font-size:0.82em; font-weight:600; }
-    .rec-score-bar { height:8px; background:rgba(0,0,0,0.25); border-radius:4px; margin-top:8px; overflow:hidden; }
-    .rec-score-fill { height:100%; border-radius:4px; background: linear-gradient(90deg, #00524B, #00A392, #00D084); }
-    </style>
-    """, unsafe_allow_html=True)
+    # Cartes rendues avec des st.container natifs pour eviter les fuites HTML
 
     for (nom_titre, groupe, cls) in sections:
         if not groupe: continue
@@ -2013,50 +1992,33 @@ def page_quoi_regarder(utz):
         st.markdown(f"### {nom_titre} ({len(groupe)})")
         for r in groupe:
             img = image_tmdb(r.get("tmdb"), "movie" if r["type"]=="Film" else "tv")
-            cimg, cc = st.columns([0.09, 0.91])
-            with cimg:
-                if img:
-                    st.image(img, use_container_width=True)
-                else:
-                    st.markdown("🎬" if r["type"]=="Film" else "📺")
-            with cc:
-                import html as html_mod
-                an_part = f"({r['annee']})" if r.get('annee') else ""
-                aj_part = f"· 📥 Ajouté il y a {r['ajout']}j" if r['ajout'] is not None else ""
-                note_part = f"{r['note']}" if r['note'] else "?"
-                ep_part = f"· 📺 {r['nb_episodes']} ép." if r["type"]=="Série" and r["nb_episodes"]>0 else ""
-                # Construction sûre des tags (échappement HTML pour éviter les fuites)
-                tags_ok = "".join(
-                    f'<span class="rec-tag-ok">✅ {html_mod.escape(str(x))}</span>'
-                    for x in r["raisons"]
-                )
-                tags_warn = "".join(
-                    f'<span class="rec-tag-warn">⚠️ {html_mod.escape(str(x))}</span>'
-                    for x in r["averti"]
-                )
-                titre_esc = html_mod.escape(str(r["titre"]))
-                type_esc = html_mod.escape(str(r["type"]))
-                genres_esc = html_mod.escape(str(r["genres"]))
-                temps_esc = html_mod.escape(str(r["temps"]))
-                st.markdown(f"""
-                <div class="rec-card-{cls}">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
-                        <div style="flex:1;">
-                            <div class="rec-titre">{type_esc} — {titre_esc} {an_part}</div>
-                            <div class="rec-meta">⭐ {note_part}<b>/10</b> · ⏱️ {temps_esc} · 🎭 {genres_esc} {ep_part} {aj_part}</div>
-                        </div>
-                        <div style="text-align:center; min-width:60px;">
-                            <div class="rec-score">{r['score']}</div>
-                            <div style="font-size:0.7em; color:#9DC5BF;">/100</div>
-                        </div>
-                    </div>
-                    <div class="rec-score-bar"><div class="rec-score-fill" style="width:{r['score']}%"></div></div>
-                    <div style="margin-top:10px;">
-                        {tags_ok}
-                        {tags_warn}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+            # Utilisation de container natif Streamlit (plus de HTML qui fuit !)
+            with st.container(border=True):
+                cimg, cmain, cscore = st.columns([0.08, 0.77, 0.15])
+                with cimg:
+                    if img:
+                        st.image(img, use_container_width=True)
+                    else:
+                        st.markdown("🎬" if r["type"]=="Film" else "📺")
+                with cmain:
+                    an_part = f" ({r['annee']})" if r.get('annee') else ""
+                    st.markdown(f"**{r['type']} — {r['titre']}{an_part}**")
+                    note_part = f"{r['note']}" if r['note'] else "?"
+                    ep_part = f" · 📺 {r['nb_episodes']} ép." if r["type"]=="Série" and r["nb_episodes"]>0 else ""
+                    aj_part = f" · 📥 Ajouté il y a {r['ajout']}j" if r['ajout'] is not None else ""
+                    st.caption(f"⭐ {note_part}/10 · ⏱️ {r['temps']} · 🎭 {r['genres']}{ep_part}{aj_part}")
+                    # Barre de progression native
+                    st.progress(min(int(r['score']),100)/100)
+                    # Tags
+                    tag_parts = []
+                    for x in r["raisons"]:
+                        tag_parts.append(f":green[✅ {x}]")
+                    for x in r["averti"]:
+                        tag_parts.append(f":orange[⚠️ {x}]")
+                    if tag_parts:
+                        st.markdown(" · ".join(tag_parts))
+                with cscore:
+                    st.metric("Score", f"{int(r['score'])}/100", label_visibility="collapsed")
 
 
 def page_wrapped():
