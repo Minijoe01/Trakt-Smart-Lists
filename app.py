@@ -181,7 +181,7 @@ st.markdown("""
         border-radius: 16px;
         padding: 20px 16px;
         text-align: center;
-        box-shadow: 0 0 25px rgba(0,163,146,0.15), 0 8px 24px rgba(0,0,0,0.25);
+        box-shadow: none !important;
         transition: transform 0.25s ease;
         margin-bottom: 12px;
     }
@@ -397,7 +397,7 @@ st.markdown("""
         border-radius: 20px;
         padding: 24px;
         border: 1px solid rgba(0,163,146,0.4);
-        box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+        box-shadow: none !important;
         margin-bottom: 24px;
     }
 
@@ -409,7 +409,7 @@ st.markdown("""
         margin-bottom: 14px;
         border-left: 4px solid var(--am-lime);
         transition: all 0.25s ease;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        box-shadow: none !important;
     }
     .ghost-card:hover { border-left:4px solid var(--am-green); transform:translateX(4px); background: var(--am-bg-card-hover); }
     .ghost-title { font-size:1.1em; font-weight:700; color: var(--am-text); margin-bottom:6px; }
@@ -446,13 +446,20 @@ def formater_date(date_str, user_tz):
 # ==================================================
 
 def demarrer_connexion():
-    r = requests.post(DEVICE_CODE_URL, json={"client_id": CLIENT_ID}, timeout=15)
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = requests.post(DEVICE_CODE_URL, json={"client_id": CLIENT_ID}, timeout=15)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        st.error(f"Erreur de connexion à Trakt : {e}")
+        return None
 
 def verifier_connexion(dc):
-    r = requests.post(DEVICE_TOKEN_URL, json={"code":dc,"client_id":CLIENT_ID,"client_secret":CLIENT_SECRET}, timeout=15)
-    return r.json() if r.status_code == 200 else None
+    try:
+        r = requests.post(DEVICE_TOKEN_URL, json={"code":dc,"client_id":CLIENT_ID,"client_secret":CLIENT_SECRET}, timeout=15)
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
 
 def rafraichir_token(rt):
     try:
@@ -481,9 +488,14 @@ def entetes(at):
     return {"Content-Type":"application/json","trakt-api-version":"2","trakt-api-key":CLIENT_ID,"Authorization":f"Bearer {at}"}
 
 def obtenir_infos(at):
-    r = requests.get("https://api.trakt.tv/users/settings", headers=entetes(at), timeout=10)
-    r.raise_for_status()
-    d = r.json()
+    try:
+        r = requests.get("https://api.trakt.tv/users/settings", headers=entetes(at), timeout=10)
+        r.raise_for_status()
+        d = r.json()
+    except Exception as e:
+        st.session_state.pop("access_token", None)
+        st.error(f"Impossible de récupérer tes informations Trakt. Reconnecte-toi. ({e})")
+        st.rerun()
     tz = d["user"].get("timezone","Europe/Paris")
     try: utz = pytz.timezone(tz)
     except Exception: utz = pytz.timezone("Europe/Paris")
@@ -542,66 +554,86 @@ def recuperer_historique(at, barre=None):
     h = entetes(at)
     films, series, films_det, ep_det = {}, {}, [], []
     nf, ne = 0,0
-    rp = requests.get("https://api.trakt.tv/users/me/history", headers=h, params={"page":1,"limit":100,"extended":"full"}, timeout=30)
-    rp.raise_for_status()
+    try:
+        rp = requests.get("https://api.trakt.tv/users/me/history", headers=h, params={"page":1,"limit":100,"extended":"full"}, timeout=30)
+        rp.raise_for_status()
+    except Exception as e:
+        st.error(f"Erreur lors de la récupération de l'historique : {e}")
+        if barre: barre.empty()
+        return {"films":{},"series":{},"films_det":[],"ep_det":[],"nb_films":0,"nb_series":0,"nb_vf":0,"nb_ep":0}
     tp = int(rp.headers.get("X-Pagination-Page-Count",1))
     for p in range(1, tp+1):
         if barre: barre.progress(p/tp*0.6, text=f"Historique : page {p}/{tp}")
-        r = requests.get("https://api.trakt.tv/users/me/history", headers=h, params={"page":p,"limit":100,"extended":"full"}, timeout=30)
-        r.raise_for_status()
+        try:
+            r = requests.get("https://api.trakt.tv/users/me/history", headers=h, params={"page":p,"limit":100,"extended":"full"}, timeout=30)
+            r.raise_for_status()
+        except Exception:
+            continue  # sauter une page qui echoue au lieu de casser tout
         for it in r.json():
-            if it["type"] == "movie":
-                nf +=1
-                m = it["movie"]
-                tid = m["ids"]["trakt"]
-                films_det.append({"titre":m["title"],"annee":m.get("year"),"genre":", ".join(m.get("genres",[])) if m.get("genres") else "Inconnu","duree":m.get("runtime",0) or 0,"note":m.get("rating",0) or 0,"date":it["watched_at"],"id":tid})
-                if tid not in films:
-                    films[tid] = {"titre":m["title"],"annee":m.get("year"),"vues":1,"dernier":it["watched_at"]}
-                else:
-                    films[tid]["vues"] +=1
-            elif it["type"] == "episode":
-                ne +=1
-                s = it["show"]
-                ep = it["episode"]
-                sid = s["ids"]["trakt"]
-                ep_det.append({"serie":s["title"],"titre":ep["title"],"saison":ep["season"],"episode":ep["number"],"annee":s.get("year"),"genre":", ".join(s.get("genres",[])) if s.get("genres") else "Inconnu","duree":ep.get("runtime",0) or s.get("runtime",40) or 40,"note":s.get("rating",0) or 0,"date":it["watched_at"],"id":sid,"network":s.get("network","Inconnu")})
-                if sid not in series:
-                    series[sid] = {"titre":s["title"],"annee":s.get("year"),"vues":1,"dernier":it["watched_at"]}
-                else:
-                    series[sid]["vues"] +=1
+            try:
+                if it["type"] == "movie":
+                    nf +=1
+                    m = it["movie"]
+                    tid = m["ids"]["trakt"]
+                    films_det.append({"titre":m["title"],"annee":m.get("year"),"genre":", ".join(m.get("genres",[])) if m.get("genres") else "Inconnu","duree":m.get("runtime",0) or 0,"note":m.get("rating",0) or 0,"date":it["watched_at"],"id":tid})
+                    if tid not in films:
+                        films[tid] = {"titre":m["title"],"annee":m.get("year"),"vues":1,"dernier":it["watched_at"]}
+                    else:
+                        films[tid]["vues"] +=1
+                elif it["type"] == "episode":
+                    ne +=1
+                    s = it["show"]
+                    ep = it["episode"]
+                    sid = s["ids"]["trakt"]
+                    ep_det.append({"serie":s["title"],"titre":ep["title"],"saison":ep["season"],"episode":ep["number"],"annee":s.get("year"),"genre":", ".join(s.get("genres",[])) if s.get("genres") else "Inconnu","duree":ep.get("runtime",0) or s.get("runtime",40) or 40,"note":s.get("rating",0) or 0,"date":it["watched_at"],"id":sid,"network":s.get("network","Inconnu")})
+                    if sid not in series:
+                        series[sid] = {"titre":s["title"],"annee":s.get("year"),"vues":1,"dernier":it["watched_at"]}
+                    else:
+                        series[sid]["vues"] +=1
+            except Exception:
+                continue
     return {"films":films,"series":series,"films_det":films_det,"ep_det":ep_det,"nb_films":len(films),"nb_series":len(series),"nb_vf":nf,"nb_ep":ne}
 
 def recuperer_listes(at):
-    r = requests.get("https://api.trakt.tv/users/me/lists", headers=entetes(at), timeout=15)
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = requests.get("https://api.trakt.tv/users/me/lists", headers=entetes(at), timeout=15)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return []
 
 def recuperer_contenu_liste(at, lid):
     h = entetes(at)
     items, p = [],1
-    while True:
-        r = requests.get(f"https://api.trakt.tv/users/me/lists/{lid}/items", headers=h, params={"page":p,"limit":100,"extended":"full"}, timeout=15)
-        r.raise_for_status()
-        d = r.json()
-        if not d: break
-        for it in d:
-            it["_listed_at"] = it.get("listed_at")
-        items.extend(d)
-        p +=1
+    try:
+        while True:
+            r = requests.get(f"https://api.trakt.tv/users/me/lists/{lid}/items", headers=h, params={"page":p,"limit":100,"extended":"full"}, timeout=15)
+            if r.status_code != 200: break
+            d = r.json()
+            if not d: break
+            for it in d:
+                it["_listed_at"] = it.get("listed_at")
+            items.extend(d)
+            p +=1
+    except Exception:
+        pass
     return items
 
 def recuperer_watchlist(at):
     h = entetes(at)
     items, p = [],1
-    while True:
-        r = requests.get("https://api.trakt.tv/users/me/watchlist", headers=h, params={"page":p,"limit":100,"extended":"full"}, timeout=15)
-        r.raise_for_status()
-        d = r.json()
-        if not d: break
-        for it in d:
-            it["_listed_at"] = it.get("listed_at")
-        items.extend(d)
-        p +=1
+    try:
+        while True:
+            r = requests.get("https://api.trakt.tv/users/me/watchlist", headers=h, params={"page":p,"limit":100,"extended":"full"}, timeout=15)
+            if r.status_code != 200: break
+            d = r.json()
+            if not d: break
+            for it in d:
+                it["_listed_at"] = it.get("listed_at")
+            items.extend(d)
+            p +=1
+    except Exception:
+        pass
     return items
 
 def recuperer_lecture(at):
@@ -693,44 +725,54 @@ def analyser(at, histo, barre=None):
 
 def recuperer_playback(at, barre=None):
     if barre: barre.progress(0.95, text="Recherche des fantômes...")
-    r = requests.get("https://api.trakt.tv/sync/playback", headers=entetes(at), timeout=15)
-    r.raise_for_status()
     res = []
-    for it in r.json():
-        if it["type"] == "movie" and it.get("movie"):
-            t = it["movie"]["title"]
-            a = it["movie"].get("year")
-            ty = "Film"
-            duree = it["movie"].get("runtime",0)
-            tmdb = it["movie"]["ids"].get("tmdb")
-        elif it["type"] == "episode" and it.get("show") and it.get("episode"):
-            ep = it["episode"]
-            t = f"{it['show']['title']} — S{ep['season']:02d}E{ep['number']:02d}"
-            a = it["show"].get("year")
-            ty = "Épisode"
-            duree = ep.get("runtime",0) or it["show"].get("runtime",0)
-            tmdb = it["show"]["ids"].get("tmdb")
-        else: continue
-        prog = round(it.get("progress",0))
-        res.append({"type":ty,"titre":t,"annee":a,"prog":prog,"dernier":it["paused_at"],"pid":it["id"],"duree":duree,"tmdb":tmdb})
-    res.sort(key=lambda x: x["dernier"])
+    try:
+        r = requests.get("https://api.trakt.tv/sync/playback", headers=entetes(at), timeout=15)
+        r.raise_for_status()
+        for it in r.json():
+            try:
+                if it["type"] == "movie" and it.get("movie"):
+                    t = it["movie"]["title"]
+                    a = it["movie"].get("year")
+                    ty = "Film"
+                    duree = it["movie"].get("runtime",0) or 0
+                    tmdb = it["movie"]["ids"].get("tmdb")
+                elif it["type"] == "episode" and it.get("show") and it.get("episode"):
+                    ep = it["episode"]
+                    t = f"{it['show']['title']} — S{ep['season']:02d}E{ep['number']:02d}"
+                    a = it["show"].get("year")
+                    ty = "Épisode"
+                    duree = ep.get("runtime",0) or it["show"].get("runtime",0) or 0
+                    tmdb = it["show"]["ids"].get("tmdb")
+                else: continue
+                prog = round(it.get("progress",0) or 0)
+                res.append({"type":ty,"titre":t,"annee":a,"prog":prog,"dernier":it["paused_at"],"pid":it["id"],"duree":duree,"tmdb":tmdb})
+            except Exception:
+                continue
+        res.sort(key=lambda x: x["dernier"])
+    except Exception:
+        pass
     return res
 
 def lancer_analyse(rafraichir=False, page_suivante="🏠 Tableau de bord"):
     barre = st.progress(0, text="Démarrage...")
-    if rafraichir or "historique" not in st.session_state:
-        st.session_state["historique"] = recuperer_historique(st.session_state["access_token"], barre)
-    res, stats, doub, doub_det = analyser(st.session_state["access_token"], st.session_state["historique"], barre)
-    pb = recuperer_playback(st.session_state["access_token"], barre)
-    np = recuperer_lecture(st.session_state["access_token"])
-    st.session_state["res"] = res
-    st.session_state["stats"] = stats
-    st.session_state["doub"] = doub
-    st.session_state["doub_det"] = doub_det
-    st.session_state["pb"] = pb
-    st.session_state["np"] = np
-    st.session_state["page_active"] = page_suivante
-    barre.empty()
+    try:
+        if rafraichir or "historique" not in st.session_state:
+            st.session_state["historique"] = recuperer_historique(st.session_state["access_token"], barre)
+        res, stats, doub, doub_det = analyser(st.session_state["access_token"], st.session_state["historique"], barre)
+        pb = recuperer_playback(st.session_state["access_token"], barre)
+        np = recuperer_lecture(st.session_state["access_token"])
+        st.session_state["res"] = res
+        st.session_state["stats"] = stats
+        st.session_state["doub"] = doub
+        st.session_state["doub_det"] = doub_det
+        st.session_state["pb"] = pb
+        st.session_state["np"] = np
+        st.session_state["page_active"] = page_suivante
+    except Exception as e:
+        st.error(f"Erreur pendant l'analyse : {e}")
+    finally:
+        barre.empty()
     st.rerun()
 
 # ==================================================
@@ -738,12 +780,16 @@ def lancer_analyse(rafraichir=False, page_suivante="🏠 Tableau de bord"):
 # ==================================================
 
 def sup_liste(at, lid, items):
+    if not items: return
     corps = {"movies":[],"shows":[]}
     for it in items:
         c = corps["movies"] if it["type"]=="Film" else corps["shows"]
         c.append({"ids":{"trakt":it["tid"]}})
-    url = "https://api.trakt.tv/sync/watchlist/remove" if lid == "watchlist" else f"https://api.trakt.tv/users/me/lists/{lid}/items/remove"
-    requests.post(url, headers=entetes(at), json=corps, timeout=15).raise_for_status()
+    try:
+        url = "https://api.trakt.tv/sync/watchlist/remove" if lid == "watchlist" else f"https://api.trakt.tv/users/me/lists/{lid}/items/remove"
+        requests.post(url, headers=entetes(at), json=corps, timeout=15).raise_for_status()
+    except Exception as e:
+        st.warning(f"Impossible de supprimer certains éléments de la liste {lid}: {e}")
 
 def sup_selection(at, items):
     pl = {}
@@ -1020,6 +1066,108 @@ def bloc_lancement():
 # PAGES
 # ==================================================
 
+def page_lecture(utz):
+    """Page En cours de lecture : SEULEMENT 1 appel API (recuperer_lecture),
+    ne necessite PAS d'analyse complete pour fonctionner — evite les crashs."""
+    st.subheader("▶️ En cours de lecture")
+    at = st.session_state["access_token"]
+    # Rafraichir la lecture en temps reel a chaque visite (1 appel ultra-rapide)
+    try:
+        np = recuperer_lecture(at)
+        st.session_state["np"] = np
+    except Exception as e:
+        st.error(f"Impossible de récupérer la lecture en cours : {e}")
+        np = None
+
+    if not np:
+        st.markdown("""
+        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:22px; color:#F0FAF8; text-align:center;">
+        🎬 Aucun contenu en lecture actuellement.
+        </div>""", unsafe_allow_html=True)
+        return
+    try:
+        if np["type"] == "movie":
+            med = np.get("movie", {})
+            titre = med.get("title", "Film inconnu")
+            annee = med.get("year")
+            tc = "Film"
+            duree = med.get("runtime", 0) or 0
+            tmdb = med.get("ids", {}).get("tmdb")
+        else:
+            med = np.get("show", {})
+            ep = np.get("episode", {})
+            ep_titre = f"S{ep.get('season',0):02d}E{ep.get('number',0):02d}"
+            if ep.get("title"):
+                ep_titre += f" — {ep['title']}"
+            titre = f"{med.get('title','Série')} — {ep_titre}"
+            annee = med.get("year")
+            tc = "Épisode"
+            duree = ep.get("runtime", 0) or med.get("runtime", 0) or 0
+            tmdb = med.get("ids", {}).get("tmdb")
+        prog = round(np.get("progress", 0) or 0)
+
+        # Calcul temps : started_at est present, duree peut etre 0 pour des films pas sortis (ex: Toy Story 5)
+        started_at = np.get("started_at")
+        debut = None
+        fin = None
+        if started_at:
+            try:
+                debut = datetime.fromisoformat(started_at.replace("Z","+00:00")).astimezone(utz)
+            except Exception:
+                debut = None
+        if debut and duree and duree > 0:
+            fin = debut + timedelta(minutes=duree)
+
+        img = image_tmdb(tmdb, "movie" if tc=="Film" else "tv") if tmdb else None
+        ci, cd = st.columns([0.2,0.8])
+        with ci:
+            if img:
+                try: st.image(img, use_container_width=True)
+                except Exception: st.markdown("🎬" if tc=="Film" else "📺")
+            else:
+                st.markdown("🎬" if tc=="Film" else "📺")
+        with cd:
+            # Cas ou la duree est inconnue (film pas sorti par exemple)
+            if duree <= 0:
+                duree_aff = "Pas encore disponible"
+                fin_aff = "Inconnue"
+                prog_aff = f"{prog}%"
+            else:
+                duree_aff = format_minutes(duree)
+                fin_aff = fin.strftime('%H:%M') if fin else "Inconnue"
+                prog_aff = f"{prog}%"
+            st.markdown(f"""
+            <div class="now-playing-card">
+                <div style="font-size:0.85em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">▶️ EN LECTURE</div>
+                <div style="font-size:1.8em; font-weight:800; color:#F0FAF8; margin-bottom:8px;">{titre}</div>
+                <div style="font-size:1em; color:#9DC5BF; margin-bottom:16px;">{tc} {f'({annee})' if annee else ''}</div>
+                <div class="progress-bar-container" style="height:14px; margin-bottom:16px;">
+                    <div class="progress-bar-fill progress-high" style="width:{max(min(prog,100),0)}%"></div>
+                </div>
+                <div style="display:grid; grid-template-columns: repeat(2,1fr); gap:14px;">
+                    <div>
+                        <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Début</div>
+                        <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{debut.strftime('%H:%M:%S') if debut else 'Inconnu'}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Fin estimée</div>
+                        <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{fin_aff}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Durée</div>
+                        <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{duree_aff}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Progression</div>
+                        <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{prog_aff}</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Erreur d'affichage de la lecture : {e}")
+
+
 def page_connexion():
     if "dc" not in st.session_state:
         st.write("Connecte ton compte Trakt pour commencer.")
@@ -1057,69 +1205,6 @@ def page_connexion():
                     st.rerun()
         st.error("Délai expiré.")
         if st.button("Réessayer"): st.rerun()
-
-def page_lecture(utz):
-    if bloc_lancement(): return
-    st.subheader("▶️ En cours de lecture")
-    np = st.session_state.get("np")
-    if not np:
-        st.markdown("""
-        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:22px; color:#F0FAF8; text-align:center;">
-        🎬 Aucun contenu en lecture actuellement.
-        </div>""", unsafe_allow_html=True)
-        return
-    if np["type"] == "movie":
-        med = np["movie"]
-        titre = med["title"]
-        annee = med.get("year")
-        tc = "Film"
-        duree = med.get("runtime", 0)
-        tmdb = med["ids"].get("tmdb")
-    else:
-        med = np["show"]
-        ep = np["episode"]
-        titre = f"{med['title']} — S{ep['season']:02d}E{ep['number']:02d}"
-        annee = med.get("year")
-        tc = "Épisode"
-        duree = ep.get("runtime",0) or med.get("runtime",0)
-        tmdb = med["ids"].get("tmdb")
-    prog = round(np.get("progress",0))
-    debut = datetime.fromisoformat(np["started_at"].replace("Z","+00:00")).astimezone(utz)
-    fin = debut + timedelta(minutes=duree) if duree>0 else None
-    img = image_tmdb(tmdb, "movie" if tc=="Film" else "tv")
-    ci, cd = st.columns([0.2,0.8])
-    with ci:
-        if img: st.image(img, use_container_width=True)
-        else: st.markdown("🎬")
-    with cd:
-        st.markdown(f"""
-        <div class="now-playing-card">
-            <div style="font-size:0.85em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">▶️ EN LECTURE</div>
-            <div style="font-size:1.8em; font-weight:800; color:#F0FAF8; margin-bottom:8px;">{titre}</div>
-            <div style="font-size:1em; color:#9DC5BF; margin-bottom:16px;">{tc} {f'({annee})' if annee else ''}</div>
-            <div class="progress-bar-container" style="height:14px; margin-bottom:16px;">
-                <div class="progress-bar-fill progress-high" style="width:{prog}%"></div>
-            </div>
-            <div style="display:grid; grid-template-columns: repeat(2,1fr); gap:14px;">
-                <div>
-                    <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Début</div>
-                    <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{debut.strftime('%H:%M:%S')}</div>
-                </div>
-                <div>
-                    <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Fin estimée</div>
-                    <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{fin.strftime('%H:%M') if fin else 'Inconnue'}</div>
-                </div>
-                <div>
-                    <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Durée</div>
-                    <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{format_minutes(duree)}</div>
-                </div>
-                <div>
-                    <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Progression</div>
-                    <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{prog}%</div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
 
 def page_dashboard(utz):
     if bloc_lancement(): return
@@ -1513,12 +1598,12 @@ def page_calendrier(utz):
                 else:
                     label = "Déjà disponible"
                     j_restant = -1
-        # Les images sont chargees a la VOLEE au moment de l'affichage, avec cache
-        img = image_tmdb(tmdb, "movie" if typ=="Film" else "tv") if tmdb else None
+        # On NE CHARGE PAS les posters ici (600 appels TMDB d'un coup = TROP LENT).
+        # On stocke juste tmdb_id et on chargera le poster au moment de l'affichage.
         sorties.append({
             "type": typ, "titre": titre, "annee": annee, "note": note,
             "genre": genre or "Inconnu", "date": ds, "j_restant": j_restant,
-            "label": label, "img": img, "status": status if typ=="Série" else ""
+            "label": label, "tmdb": tmdb, "status": status if typ=="Série" else ""
         })
 
     cf1, cf2, cf3 = st.columns(3)
@@ -1529,7 +1614,7 @@ def page_calendrier(utz):
     with cf3:
         f_tri = st.selectbox("Trier par", ["Date (proche → loin)", "Note (meilleure d'abord)", "Titre A→Z"], key="cal_tri")
 
-    df = pd.DataFrame(sorties) if sorties else pd.DataFrame(columns=["type","titre","annee","note","genre","date","j_restant","label","img","status"])
+    df = pd.DataFrame(sorties) if sorties else pd.DataFrame(columns=["type","titre","annee","note","genre","date","j_restant","label","tmdb","status"])
     if not df.empty:
         if f_type == "Films": df = df[df["type"]=="Film"]
         if f_type == "Séries": df = df[df["type"]=="Série"]
@@ -1597,9 +1682,16 @@ def page_calendrier(utz):
             with st.container(border=True):
                 ci, cd = st.columns([0.10, 0.90])
                 with ci:
-                    if r.get("img"):
+                    # Chargement paresseux UNIQUEMENT au moment de l'affichage
+                    # (pas pour les 600 items d'un coup)
+                    tmdb_id = r.get("tmdb")
+                    if tmdb_id:
                         try:
-                            st.image(r["img"], use_container_width=True)
+                            img_url = image_tmdb(tmdb_id, "movie" if r["type"]=="Film" else "tv")
+                            if img_url:
+                                st.image(img_url, use_container_width=True)
+                            else:
+                                st.markdown("🎬" if r["type"]=="Film" else "📺")
                         except Exception:
                             st.markdown("🎬" if r["type"]=="Film" else "📺")
                     else:
