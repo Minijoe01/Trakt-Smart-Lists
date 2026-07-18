@@ -289,33 +289,50 @@ st.markdown("""
 
     /* (Les styles des alertes sont definis plus haut, avec le warning #00D084) */
 
-    /* Tous les boutons : meme style, PAS D'OMBRE, meme aspect que le bouton Excel */
+    /* TOUS les boutons : style UNIFORME, PAS D'OMBRE, aucune difference */
     .stButton > button,
-    div[data-testid="stDownloadButton"] > button {
-        font-weight: 600; padding: 0.7em 1.3em; color: var(--am-text) !important;
-        transition: all 0.2s ease;
-        background: rgba(3, 30, 27, 0.65) !important;
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
+    div[data-testid="stDownloadButton"] > button,
+    div[data-testid="stFormSubmitButton"] > button {
+        font-weight: 600 !important;
+        padding: 0.75em 1.3em !important;
+        color: var(--am-text) !important;
+        transition: background 0.15s ease !important;
+        background: rgba(5, 38, 34, 0.75) !important;
+        backdrop-filter: blur(14px) !important;
+        -webkit-backdrop-filter: blur(14px) !important;
         border-radius: 16px !important;
-        border: 1px solid rgba(0,163,146,0.25) !important;
+        border: 1px solid rgba(0,163,146,0.3) !important;
         box-shadow: none !important;
-        width: 100%;
+        text-shadow: none !important;
+        width: 100% !important;
+        margin: 0 !important;
     }
     .stButton > button:hover,
-    div[data-testid="stDownloadButton"] > button:hover {
-        background: rgba(12, 75, 68, 0.75) !important;
-        border-color: rgba(0,163,146,0.45) !important;
+    div[data-testid="stDownloadButton"] > button:hover,
+    div[data-testid="stFormSubmitButton"] > button:hover {
+        background: rgba(8, 55, 50, 0.85) !important;
+        border-color: rgba(0,163,146,0.5) !important;
         box-shadow: none !important;
+        transform: none !important;
     }
+    /* Bouton primaire : gradient vert */
     .stButton > button[kind="primary"] {
         background: linear-gradient(135deg, var(--am-green) 0%, var(--am-green-aston) 100%) !important;
-        border: none !important; font-weight: 700;
+        border: none !important;
+        font-weight: 700 !important;
         box-shadow: none !important;
+        color: #ffffff !important;
     }
     .stButton > button[kind="primary"]:hover {
         background: linear-gradient(135deg, #00B8A5 0%, #006058 100%) !important;
         box-shadow: none !important;
+    }
+    /* Forcer le telechargement a etre identique */
+    div[data-testid="stDownloadButton"] {
+        margin: 0 !important; padding: 0 !important;
+    }
+    div[data-testid="stDownloadButton"] > button {
+        margin: 0 !important;
     }
 
     section[data-testid="stSidebar"] {
@@ -917,7 +934,10 @@ def page_connexion():
         with cg:
             st.markdown(f'<a href="{url}" target="_blank" style="display:inline-block; background:linear-gradient(135deg,#00A392,#00524B); color:white; padding:0.9em 1.7em; border-radius:12px; text-decoration:none; font-weight:700;">Autoriser l\'accès</a>', unsafe_allow_html=True)
             st.caption("Sur n'importe quel appareil.")
-            st.info(f"Code : **{st.session_state['uc']}**")
+            st.markdown(f"""
+            <div style="background: rgba(0,102,95,0.35); border:1px solid rgba(0,163,146,0.3); border-radius:14px; padding:18px; color:#F0FAF8; font-size:1.05em;">
+            Code : <b style="color:#CEDC00; font-size:1.3em; letter-spacing:3px;">{st.session_state['uc']}</b>
+            </div>""", unsafe_allow_html=True)
         with cd:
             st.image(qrcode_img(url), width=160)
             st.caption("Ou scanne le QR code.")
@@ -940,7 +960,10 @@ def page_lecture(utz):
     st.subheader("▶️ En cours de lecture")
     np = st.session_state.get("np")
     if not np:
-        st.info("🎬 Aucun contenu en lecture actuellement.")
+        st.markdown("""
+        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:22px; color:#F0FAF8; text-align:center;">
+        🎬 Aucun contenu en lecture actuellement.
+        </div>""", unsafe_allow_html=True)
         return
     if np["type"] == "movie":
         med = np["movie"]
@@ -968,7 +991,7 @@ def page_lecture(utz):
     with cd:
         st.markdown(f"""
         <div class="now-playing-card">
-            <div style="font-size:0.85em; color:#00D084; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">▶️ EN LECTURE</div>
+            <div style="font-size:0.85em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">▶️ EN LECTURE</div>
             <div style="font-size:1.8em; font-weight:800; color:#F0FAF8; margin-bottom:8px;">{titre}</div>
             <div style="font-size:1em; color:#9DC5BF; margin-bottom:16px;">{tc} {f'({annee})' if annee else ''}</div>
             <div class="progress-bar-container" style="height:14px; margin-bottom:16px;">
@@ -1117,7 +1140,7 @@ def page_nettoyage(utz):
     st.subheader("Pourcentage de nettoyage par liste")
     df = pd.DataFrame(st.session_state["stats"])
     df["% nettoyable"] = (df["vus"]/df["total"].replace(0,1)*100).round(1)
-    st.bar_chart(df.set_index("nom")["% nettoyable"], color="#00D084")
+    st.bar_chart(df.set_index("nom")["% nettoyable"], color="#CEDC00")
 
 def page_doublons(utz):
     if bloc_lancement(): return
@@ -1172,9 +1195,16 @@ def page_fantomes(utz):
     st.caption("Supprime les entrées bloquées dans 'Continuer à regarder'.")
     st.divider()
     if not pb:
-        st.success("Aucune progression en cours.")
+        st.markdown("""
+        <div style="background: rgba(0,102,95,0.35); border:1px solid rgba(0,163,146,0.3); border-radius:14px; padding:18px; color:#F0FAF8;">
+        ✅ Aucune progression en cours.
+        </div>""", unsafe_allow_html=True)
     else:
-        tout = st.checkbox("Tout sélectionner")
+        if "tout_pb" not in st.session_state:
+            st.session_state["tout_pb"] = False
+        col_tout, _ = st.columns([1,3])
+        with col_tout:
+            tout = st.checkbox("Tout sélectionner", key="tout_pb")
         sels = {}
         for it in pb:
             p = it["prog"]
@@ -1185,7 +1215,7 @@ def page_fantomes(utz):
             with st.container():
                 cc, cimg, cd = st.columns([0.05, 0.12, 0.83])
                 with cc:
-                    sels[it["pid"]] = st.checkbox("", value=tout, key=f"c_{it['pid']}", label_visibility="collapsed")
+                    sels[it["pid"]] = st.checkbox("", value=st.session_state.tout_pb, key=f"c_{it['pid']}", label_visibility="collapsed")
                 with cimg:
                     if img:
                         st.image(img, use_container_width=True)
@@ -1223,12 +1253,18 @@ def page_fantomes(utz):
                         st.session_state[conf] = False
                         st.rerun()
         else:
-            st.info("Coche les éléments à supprimer.")
+            st.markdown("""
+            <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:14px; color:#9DC5BF; text-align:center;">
+            Coche les éléments à supprimer.
+            </div>""", unsafe_allow_html=True)
 
 def page_calendrier(utz):
     if bloc_lancement(): return
     st.subheader("📅 Calendrier des sorties")
-    st.info("🚧 Prochainement.")
+    st.markdown("""
+    <div style="background: rgba(0,102,95,0.35); border:1px solid rgba(0,163,146,0.3); border-radius:14px; padding:22px; color:#F0FAF8;">
+    🚧 Prochainement.
+    </div>""", unsafe_allow_html=True)
 
 def page_succes(utz):
     if bloc_lancement(): return
@@ -1403,7 +1439,10 @@ def page_succes(utz):
                 </div>
                 """, unsafe_allow_html=True)
     else:
-        st.info("Continue de regarder des contenus pour gagner tes premiers badges !")
+        st.markdown("""
+        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:18px; color:#F0FAF8; text-align:center;">
+        Continue de regarder des contenus pour gagner tes premiers badges !
+        </div>""", unsafe_allow_html=True)
 
     if locks:
         st.divider()
@@ -1470,7 +1509,10 @@ def page_stats(utz):
         df["date_dt"] = pd.to_datetime(df["date"], utc=True).dt.tz_convert(utz)
         dfs.append(df)
     if not dfs:
-        st.info("Aucune donnée.")
+        st.markdown("""
+        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:18px; color:#F0FAF8; text-align:center;">
+        Aucune donnée.
+        </div>""", unsafe_allow_html=True)
         return
     df = pd.concat(dfs, ignore_index=True)
     mt = datetime.now(utz)
@@ -1548,7 +1590,7 @@ def page_stats(utz):
     # Heures par mois
     df["mois"] = df["date_dt"].dt.strftime("%m-%Y")
     h_mois = df.groupby("mois")["duree_h"].sum().round(1).sort_index()
-    opt_m = {"title":{"text":"Heures par mois","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":list(h_mois.index),"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"line","smooth":True,"lineStyle":{"color":"#00D084","width":3},"areaStyle":{"color":"rgba(0,208,132,0.12)"},"itemStyle":{"color":"#00D084"}}]}
+    opt_m = {"title":{"text":"Heures par mois","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":list(h_mois.index),"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"line","smooth":True,"lineStyle":{"color":"#CEDC00","width":3},"areaStyle":{"color":"rgba(206,220,0,0.10)"},"itemStyle":{"color":"#CEDC00"}}]}
     st_echarts(opt_m, height="350px")
 
     g1,g2 = st.columns(2)
@@ -1559,7 +1601,7 @@ def page_stats(utz):
             for g in lg:
                 if g and g != "Inconnu":
                     genres_n[g] = genres_n.get(g,0) + 1
-        opt_g = {"title":{"text":"Genres les plus regardés (nombre de contenus)","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"name":k,"value":v} for k,v in sorted(genres_n.items(), key=lambda x:-x[1])[:8]],"itemStyle":{"borderRadius":8,"borderColor":"#042E2B","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#CEDC00","#00C7B3","#00A392","#00524B","#008477","#125A54","#E8F064"]}
+        opt_g = {"title":{"text":"Genres les plus regardés (nombre de contenus)","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"name":k,"value":v} for k,v in sorted(genres_n.items(), key=lambda x:-x[1])[:8]],"itemStyle":{"borderRadius":8,"borderColor":"#042E2B","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#CEDC00","#00A392","#00A392","#00524B","#A3B300","#869400","#E8F064"]}
         st_echarts(opt_g, height="400px")
     with g2:
         df["h"] = df["date_dt"].dt.hour
@@ -1572,7 +1614,7 @@ def page_stats(utz):
         jours = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
         df["jsem"] = df["date_dt"].dt.weekday
         hj = df.groupby("jsem")["duree_h"].sum().reindex(range(7), fill_value=0).round(1)
-        opt_j = {"title":{"text":"Par jour de la semaine","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","xAxis":{"type":"category","data":jours,"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(hj.values),"type":"bar","itemStyle":{"color":"#00D084","borderRadius":[4,4,0,0]}}]}
+        opt_j = {"title":{"text":"Par jour de la semaine","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","xAxis":{"type":"category","data":jours,"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(hj.values),"type":"bar","itemStyle":{"color":"#CEDC00","borderRadius":[4,4,0,0]}}]}
         st_echarts(opt_j, height="400px")
     with g4:
         # Années de sortie
@@ -1774,10 +1816,14 @@ def evaluer_contenu(item, profil, maintenant_tz):
             points_noirs.append(f"Engagement important ({nb_aired} épisodes)")
         if status_txt == "ended":
             raisons.append("Série terminée (pas d'attente)")
-        elif status_txt == "returning" or status_txt == "in production":
-            raisons.append("Série en cours de diffusion")
+        elif status_txt in ("returning", "continuing"):
+            if nb_aired > 0:
+                raisons.append("Série en cours de diffusion")
         elif status_txt == "canceled":
             points_noirs.append("Série annulée")
+        elif status_txt in ("in production", "planned", "pilot"):
+            if nb_aired == 0:
+                points_noirs.append("Pas encore sortie")
 
     # 5. Ajout dans la liste
     listed_at = item.get("_listed_at")
@@ -1887,7 +1933,10 @@ def page_quoi_regarder(utz):
             resultats.append(ev)
 
     if not resultats:
-        st.info("Aucun contenu à évaluer dans cette liste.")
+        st.markdown("""
+        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:18px; color:#F0FAF8; text-align:center;">
+        Aucun contenu à évaluer dans cette liste.
+        </div>""", unsafe_allow_html=True)
         return
 
     # FILTRES
@@ -1905,7 +1954,7 @@ def page_quoi_regarder(utz):
     with cf3:
         f_temps_max = st.selectbox("⏱️ Temps max", ["Aucune limite", "Moins d'1h30 (film)", "Moins de 2h", "Moins de 3h", "Soirée (< 10h)", "Week-end (< 24h)"])
     with cf4:
-        f_statut = st.selectbox("📺 Statut série", ["Tous les statuts", "Séries terminées", "Séries en cours", "Séries annulées", "Pilot/En prod"])
+        f_statut = st.selectbox("📺 Statut série", ["Tous les statuts", "Séries terminées", "Séries en cours", "Séries annulées", "Pas encore sorties"])
     with cf5:
         f_tri = st.selectbox("🔀 Trier par", ["✨ Pour moi (recommandé)", "⭐ Meilleures notes", "⏱️ Plus rapide", "🔥 Populaires", "🆕 Ajouté récemment", "📅 Nouveautés", "🎬 Films d'abord", "📺 Séries d'abord", "🙅 Pas pour moi"])
 
@@ -1924,12 +1973,15 @@ def page_quoi_regarder(utz):
 
     def statut_ok(r):
         if f_statut == "Tous les statuts": return True
-        if r["type"] == "Film": return True  # les films ne sont pas concernes
+        if r["type"] == "Film": return True  # les films ne sont pas concernes par ce filtre
         s = r.get("status", "") or ""
+        nbep = r.get("nb_episodes", 0) or 0
         if f_statut == "Séries terminées": return s == "ended"
-        if f_statut == "Séries en cours": return s in ("returning", "in production", "continuing")
+        # Séries en cours : au moins une saison sortie + nouvelles saisons annoncées/prevues
+        if f_statut == "Séries en cours":
+            return s in ("returning", "continuing") and nbep > 0
         if f_statut == "Séries annulées": return s == "canceled"
-        if f_statut == "Pilot/En prod": return s in ("planned", "in production", "pilot")
+        if f_statut == "Pas encore sorties": return s in ("planned", "in production", "pilot") or nbep == 0
         return True
 
     filtrés = []
@@ -1948,51 +2000,50 @@ def page_quoi_regarder(utz):
 
     st.markdown(f"**{len(filtrés)}** contenus évalués.")
 
-    # Tris
+    # Tris : CHAQUE TRIE AFFICHE EXACTEMENT CE QU'IL DIT, PAS DE SOUS-SECTIONS MELEES
     if f_tri == "✨ Pour moi (recommandé)":
-        filtrés.sort(key=lambda x: -x["score"])
-        top = [r for r in filtrés if r["score"] >= 50 and not r["pas_pour_moi"]]
-        bof = [r for r in filtrés if 30 <= r["score"] < 50 and not r["pas_pour_moi"]]
-        bad = [r for r in filtrés if r["pas_pour_moi"]]
-        sections = [("✨ Recommandations personnalisées", top, "rec"),
-                    ("🤔 Pourquoi pas", bof, "mid"),
-                    ("🙅 Ne correspond pas à mon profil", bad, "bad")]
+        # Dans ce mode : 3 sous-sections
+        top = sorted([r for r in filtrés if r["score"] >= 50 and not r["pas_pour_moi"]], key=lambda x: -x["score"])
+        bof = sorted([r for r in filtrés if 30 <= r["score"] < 50 and not r["pas_pour_moi"]], key=lambda x: -x["score"])
+        bad = sorted([r for r in filtrés if r["pas_pour_moi"]], key=lambda x: x["score"])
+        sections = [("✨ Recommandations personnalisées", top),
+                    ("🤔 Pourquoi pas", bof),
+                    ("🙅 Ne correspond pas à mon profil", bad)]
     elif f_tri == "⭐ Meilleures notes":
-        filtrés.sort(key=lambda x: -(x["note"] or 0))
-        sections = [("⭐ Par note décroissante", filtrés, "mid")]
-    elif f_tri == "⏱️ Plus rapide à regarder":
-        filtrés.sort(key=lambda x: x["duree_min"])
-        sections = [("⏱️ Du plus rapide au plus long", filtrés, "mid")]
+        ok = sorted(filtrés, key=lambda x: (-(x["note"] or 0), -x["score"]))
+        sections = [("⭐ Par note décroissante", ok)]
+    elif f_tri == "⏱️ Plus rapide":
+        ok = sorted(filtrés, key=lambda x: (x["duree_min"], -x["score"]))
+        sections = [("⏱️ Du plus rapide au plus long", ok)]
     elif f_tri == "🔥 Populaires":
-        filtrés.sort(key=lambda x: -x["votes"])
-        sections = [("🔥 Les plus populaires", filtrés, "mid")]
+        ok = sorted(filtrés, key=lambda x: -x["votes"])
+        sections = [("🔥 Les plus populaires", ok)]
     elif f_tri == "🆕 Ajouté récemment":
-        filtrés.sort(key=lambda x: 999999 if x["ajout"] is None else x["ajout"])
-        sections = [("🆕 Derniers ajouts dans la liste", filtrés, "mid")]
-    elif f_tri == "📅 Nouveautés (sorties)":
-        filtrés.sort(key=lambda x: -(x["annee"] or 0))
-        sections = [("📅 Sorties les plus récentes", filtrés, "mid")]
+        ok = sorted(filtrés, key=lambda x: 999999 if x["ajout"] is None else x["ajout"])
+        sections = [("🆕 Derniers ajouts dans la liste", ok)]
+    elif f_tri == "📅 Nouveautés":
+        ok = sorted(filtrés, key=lambda x: -(x["annee"] or 0))
+        sections = [("📅 Sorties les plus récentes", ok)]
     elif f_tri == "🎬 Films d'abord":
         films = sorted([r for r in filtrés if r["type"]=="Film"], key=lambda x: -x["score"])
         series = sorted([r for r in filtrés if r["type"]=="Série"], key=lambda x: -x["score"])
-        sections = [("🎬 Films", films, "rec"), ("📺 Séries", series, "mid")]
+        sections = [("🎬 Films", films), ("📺 Séries", series)]
     elif f_tri == "📺 Séries d'abord":
         series = sorted([r for r in filtrés if r["type"]=="Série"], key=lambda x: -x["score"])
         films = sorted([r for r in filtrés if r["type"]=="Film"], key=lambda x: -x["score"])
-        sections = [("📺 Séries", series, "rec"), ("🎬 Films", films, "mid")]
+        sections = [("📺 Séries", series), ("🎬 Films", films)]
     else:
-        filtrés.sort(key=lambda x: x["score"])
-        sections = [("🙅 Contenus qui ne correspondent pas à mon profil", [r for r in filtrés if r["pas_pour_moi"]], "bad")]
+        # Tri "🙅 Pas pour moi" : affiche UNIQUEMENT les contenus qui ne correspondent pas
+        ok = sorted([r for r in filtrés if r["pas_pour_moi"]], key=lambda x: x["score"])
+        sections = [("🙅 Contenus qui ne correspondent pas à mon profil", ok)]
 
-    # Cartes rendues avec des st.container natifs pour eviter les fuites HTML
-
-    for (nom_titre, groupe, cls) in sections:
+    # Affichage des sections (2 elements par tuple : nom + liste, plus de classe CSS)
+    for (nom_titre, groupe) in sections:
         if not groupe: continue
         st.divider()
         st.markdown(f"### {nom_titre} ({len(groupe)})")
         for r in groupe:
             img = image_tmdb(r.get("tmdb"), "movie" if r["type"]=="Film" else "tv")
-            # Utilisation de container natif Streamlit (plus de HTML qui fuit !)
             with st.container(border=True):
                 cimg, cmain, cscore = st.columns([0.08, 0.77, 0.15])
                 with cimg:
@@ -2007,9 +2058,7 @@ def page_quoi_regarder(utz):
                     ep_part = f" · 📺 {r['nb_episodes']} ép." if r["type"]=="Série" and r["nb_episodes"]>0 else ""
                     aj_part = f" · 📥 Ajouté il y a {r['ajout']}j" if r['ajout'] is not None else ""
                     st.caption(f"⭐ {note_part}/10 · ⏱️ {r['temps']} · 🎭 {r['genres']}{ep_part}{aj_part}")
-                    # Barre de progression native
                     st.progress(min(int(r['score']),100)/100)
-                    # Tags
                     tag_parts = []
                     for x in r["raisons"]:
                         tag_parts.append(f":green[✅ {x}]")
@@ -2023,11 +2072,17 @@ def page_quoi_regarder(utz):
 
 def page_wrapped():
     st.subheader("🎬 Rendez-vous annuel")
-    st.info("🚧 Bientôt : récapitulatif annuel façon Spotify Wrapped.")
+    st.markdown("""
+    <div style="background: rgba(0,102,95,0.35); border:1px solid rgba(0,163,146,0.3); border-radius:14px; padding:22px; color:#F0FAF8;">
+    🚧 Bientôt : récapitulatif annuel façon Spotify Wrapped.
+    </div>""", unsafe_allow_html=True)
 
 def page_sauvegarde():
     st.subheader("📤 Sauvegarde et restauration")
-    st.info("🚧 Bientôt : export/import de tes données.")
+    st.markdown("""
+    <div style="background: rgba(0,102,95,0.35); border:1px solid rgba(0,163,146,0.3); border-radius:14px; padding:22px; color:#F0FAF8;">
+    🚧 Bientôt : export/import de tes données.
+    </div>""", unsafe_allow_html=True)
 
 # ==================================================
 # RECONNEXION AUTO
