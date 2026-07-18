@@ -764,7 +764,7 @@ def forme(ws, coul="00524B"):
         c.alignment = Alignment(horizontal="center")
     ajuster(ws)
 
-def generer_excel(pseudo, histo, res, stats, doub, pb, utz):
+def generer_excel(pseudo, histo, res, stats, doub, pb, utz, at=None):
     th = sum(m["duree"] for m in histo["films_det"])/60 + sum(e["duree"] for e in histo["ep_det"])/60
     df_sum = pd.DataFrame([
         ["Compte",pseudo],["Fuseau",utz.zone],
@@ -773,6 +773,38 @@ def generer_excel(pseudo, histo, res, stats, doub, pb, utz):
         ["Listes",len(stats)-1],["Total contenus",sum(s["total"] for s in stats)],
         ["Déjà vus",len(res)],["Doublons",len(doub)],["Fantômes",len(pb)]
     ], columns=["Statistique","Valeur"])
+
+    # Feuille Recommandations si access token disponible
+    df_reco = pd.DataFrame(columns=["Type","Titre","Année","Note","Genres","Temps nécessaire","Score /100","Pourquoi","Avertissements","Statut"])
+    if at is not None:
+        try:
+            profil = construire_profil(histo, utz)
+            mt = datetime.now(utz)
+            items = recuperer_watchlist(at)
+            deja_vus_tids = set((r["type"], r["tid"]) for r in res if not r.get("ajoute_apres", False))
+            recos = []
+            for it in items:
+                ev = evaluer_contenu(it, profil, mt)
+                if not ev: continue
+                cle_type = ev["type"]
+                cle_tid = it["movie"]["ids"]["trakt"] if it["type"]=="movie" else it["show"]["ids"]["trakt"]
+                if (cle_type, cle_tid) in deja_vus_tids: continue
+                if ev["pas_pour_moi"]: continue
+                recos.append({
+                    "Type": ev["type"],
+                    "Titre": ev["titre"],
+                    "Année": ev["annee"],
+                    "Note": ev["note"],
+                    "Genres": ev["genres"],
+                    "Temps nécessaire": ev["temps"],
+                    "Score /100": ev["score"],
+                    "Pourquoi": " ; ".join(ev["raisons"]),
+                    "Avertissements": " ; ".join(ev["averti"]),
+                    "Statut": ev.get("status","") if ev["type"]=="Série" else ""
+                })
+            df_reco = pd.DataFrame(recos).sort_values("Score /100", ascending=False)
+        except Exception:
+            pass
     df_res = pd.DataFrame(res)
     if not df_res.empty:
         df_res = df_res[["liste","type","titre","annee","vues","dernier","ajoute_apres","tmdb"]].copy()
@@ -805,6 +837,8 @@ def generer_excel(pseudo, histo, res, stats, doub, pb, utz):
         df_d.to_excel(wr, sheet_name="Doublons", index=False)
         df_pb.to_excel(wr, sheet_name="Fantômes", index=False)
         df_sl.to_excel(wr, sheet_name="Listes", index=False)
+        if not df_reco.empty:
+            df_reco.to_excel(wr, sheet_name="Recommandations", index=False)
     buf.seek(0)
     wb = load_workbook(buf)
     for sh in wb: forme(sh)
@@ -891,7 +925,7 @@ def entete():
         stats = st.session_state["stats"]
         doub = st.session_state["doub"]
         pb = st.session_state["pb"]
-        xl = generer_excel(pseudo, h, res, stats, doub, pb, utz)
+        xl = generer_excel(pseudo, h, res, stats, doub, pb, utz, at=st.session_state["access_token"])
         c1,c2,c3 = st.columns(3)
         with c1:
             if st.button("🔄 Analyse rapide", use_container_width=True):
@@ -904,7 +938,7 @@ def entete():
                     st.session_state.pop(k, None)
                 st.rerun()
         with c3:
-            st.download_button("📥 Rapport Excel", data=xl, file_name=f"trakt_{pseudo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            st.download_button("📥 Rapport Excel", data=xl, file_name=f"trakt_{pseudo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="secondary")
     st.markdown("<hr style='margin:0.4rem 0 1rem 0; border-color: rgba(18,90,84,0.4);'/>", unsafe_allow_html=True)
     return utz
 
@@ -1252,7 +1286,7 @@ def page_fantomes(utz):
             with st.container():
                 cc, cimg, cd = st.columns([0.05, 0.12, 0.83])
                 with cc:
-                    sels[it["pid"]] = st.checkbox("", value=st.session_state.tout_pb, key=f"c_{it['pid']}", label_visibility="collapsed")
+                    sels[it["pid"]] = st.checkbox("", value=False, key=f"c_{it['pid']}", label_visibility="collapsed")
                 with cimg:
                     if img:
                         st.image(img, use_container_width=True)
@@ -2128,10 +2162,81 @@ def page_wrapped():
 
 def page_sauvegarde():
     st.subheader("📤 Sauvegarde et restauration")
-    st.markdown("""
-    <div style="background: rgba(0,102,95,0.35); border:1px solid rgba(0,163,146,0.3); border-radius:14px; padding:22px; color:#F0FAF8;">
-    🚧 Bientôt : export/import de tes données.
-    </div>""", unsafe_allow_html=True)
+    st.caption("Exporte toutes tes données (listes, historique, paramètres) dans un fichier JSON que tu peux conserver précieusement, ou restaure-les depuis un fichier précédent.")
+
+    at = st.session_state["access_token"]
+    h = st.session_state["historique"]
+    res = st.session_state.get("res", [])
+    stats = st.session_state.get("stats", [])
+    doub = st.session_state.get("doub", [])
+    pb = st.session_state.get("pb", [])
+    infos = st.session_state.get("infos", {})
+    pseudo = infos.get("pseudo", "utilisateur")
+    utz = infos.get("tz")
+
+    cexp, cimp = st.columns(2)
+
+    with cexp:
+        st.markdown("#### 📤 Exporter mes données")
+        st.markdown("Télécharge un fichier JSON contenant :")
+        st.markdown("- ✅ Ton historique de visionnage détaillé")
+        st.markdown("- ✅ Tes statistiques de listes")
+        st.markdown("- ✅ Tes doublons détectés")
+        st.markdown("- ✅ Tes progressions fantômes")
+        st.markdown("- ✅ Tes contenus à nettoyer")
+        st.markdown("- ✅ La date d'export et ton pseudo")
+
+        if st.button("📥 Générer la sauvegarde", use_container_width=True):
+            sauvegarde = {
+                "version": 1,
+                "export_date": datetime.now(utz).isoformat() if utz else datetime.now().isoformat(),
+                "pseudo": pseudo,
+                "historique": h,
+                "stats_listes": stats,
+                "a_nettoyer": res,
+                "doublons": doub,
+                "doublons_det": st.session_state.get("doub_det", []),
+                "fantomes": pb,
+            }
+            import json
+            data_json = json.dumps(sauvegarde, ensure_ascii=False, indent=2, default=str)
+            st.download_button(
+                "💾 Télécharger la sauvegarde JSON",
+                data=data_json.encode("utf-8"),
+                file_name=f"trakt_backup_{pseudo}_{datetime.now().strftime('%Y%m%d')}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+
+    with cimp:
+        st.markdown("#### 📥 Importer une sauvegarde")
+        st.markdown("Restaure tes données depuis un fichier JSON exporté précédemment.")
+        st.warning("⚠️ L'import ne modifie PAS tes données sur Trakt, il recharge simplement les données dans l'application pour éviter une nouvelle analyse.")
+        fichier = st.file_uploader("Choisis un fichier JSON", type=["json"])
+        if fichier is not None:
+            try:
+                import json
+                data = json.load(fichier)
+                if data.get("version") == 1:
+                    st.success(f"✅ Sauvegarde valide ! Pseudo : **{data.get('pseudo','inconnu')}**  • Export du {data.get('export_date','?')}")
+                    if st.button("🔄 Restaurer dans l'application", type="primary", use_container_width=True):
+                        if data.get("historique"): st.session_state["historique"] = data["historique"]
+                        if data.get("stats_listes"): st.session_state["stats"] = data["stats_listes"]
+                        if data.get("a_nettoyer"): st.session_state["res"] = data["a_nettoyer"]
+                        if data.get("doublons"): st.session_state["doub"] = data["doublons"]
+                        if data.get("doublons_det"): st.session_state["doub_det"] = data["doublons_det"]
+                        if data.get("fantomes"): st.session_state["pb"] = data["fantomes"]
+                        st.session_state["np"] = recuperer_lecture(at)
+                        st.success("✅ Données restaurées dans l'application !")
+                        st.rerun()
+                else:
+                    st.error("❌ Format de sauvegarde non reconnu.")
+            except Exception as e:
+                st.error(f"❌ Erreur lors de la lecture du fichier : {e}")
+
+    st.divider()
+    st.markdown("#### ℹ️ À savoir")
+    st.info("Tes identifiants et tokens d'authentification ne sont JAMAIS inclus dans la sauvegarde pour des raisons de sécurité. Tu devras rester connecté après un refresh, et l'application refera simplement une récupération des données live (listes/playbacks) la prochaine fois si tu fais une analyse rapide.")
 
 # ==================================================
 # RECONNEXION AUTO
