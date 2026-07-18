@@ -67,14 +67,40 @@ st.markdown("""
         --am-text-muted: #9DC5BF;
     }
 
-    /* FOND ASTON MARTIN 2026 : halo radial lumineux centre/haut + profondeur sombre sur les bords et le bas */
+    /* Cache le ruban Streamlit par defaut qui prend de la place et gene le scroll */
+    #MainMenu {visibility: hidden;}
+    header[data-testid="stHeader"] {visibility: hidden; background: transparent !important;}
+    footer {visibility: hidden;}
+
+    /* FOND ASTON MARTIN 2026 - VERSION A FIDELE A LA CAPTURE :
+       diffusion TRES LENTE et progressive du vert clair, qui recouvre toute la page.
+       Le vert mat moyen est present sur 70% de la hauteur puis s'assombrit doucement. */
     .stApp {
         background:
-            radial-gradient(ellipse 80% 55% at 50% -10%, rgba(0, 143, 128, 0.85) 0%, rgba(0, 102, 95, 0.45) 42%, transparent 65%),
-            radial-gradient(ellipse 120% 80% at 50% 0%, #005E57 0%, #00433E 35%, #002B28 65%, #021715 100%) !important;
+            /* halo principal large et doux centre-haut, diffusion tres etendue */
+            radial-gradient(ellipse 120% 70% at 50% 0%, rgba(0, 105, 95, 0.9) 0%, rgba(0, 80, 73, 0.6) 35%, transparent 70%),
+            /* assombrissement progressif des coins gauche/droite/bas */
+            radial-gradient(ellipse 80% 60% at 0% 100%, rgba(1, 22, 20, 0.9) 0%, transparent 55%),
+            radial-gradient(ellipse 80% 60% at 100% 100%, rgba(1, 22, 20, 0.9) 0%, transparent 55%),
+            /* couleur de base : vert mat profond sur toute la page */
+            linear-gradient(180deg, #005951 0%, #004841 40%, #002D2A 75%, #011917 100%) !important;
         background-attachment: fixed !important;
         min-height: 100vh;
     }
+
+    /* Header sticky persistant pour remplacer le ruban Streamlit */
+    .custom-top-bar {
+        position: sticky; top: 0; z-index: 999;
+        background: rgba(2, 20, 18, 0.85);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border-bottom: 1px solid var(--am-border);
+        padding: 10px 20px;
+        display: flex; align-items: center; gap: 16px;
+        margin: -1.2rem -1.2rem 1rem -1.2rem;
+    }
+    .custom-top-bar .title-top { font-size: 1.2em; font-weight: 700; color: var(--am-text); margin:0; }
+    .custom-top-bar .info-top { font-size: 0.9em; color: var(--am-text-muted); margin:0; }
 
     /* Badges obtenus */
     .badge-obtenu {
@@ -176,29 +202,50 @@ st.markdown("""
         box-shadow: 0 8px 32px rgba(0,0,0,0.22) !important;
     }
 
-    /* Messages connexion : palette ASTON COHERENTE, plus de bleu/olif qui jurent */
-    div.stInfo {
-        background: linear-gradient(135deg, rgba(0,102,95,0.45) 0%, rgba(0,70,65,0.55) 100%) !important;
-        border-left: 4px solid var(--am-green) !important;
-        border: 1px solid rgba(0,163,146,0.35) !important;
+    /* Messages connexion : palette ASTON COHERENTE, plus de bleu/olive qui jurent.
+       On utilise des selecteurs forts pour ecraser les styles inline Streamlit */
+    div.stAlert, div[data-testid="stAlert"] {
+        background-color: rgba(8, 55, 50, 0.75) !important;
+        backdrop-filter: blur(14px) !important;
+        -webkit-backdrop-filter: blur(14px) !important;
+        border-radius: 16px !important;
+        border: 1px solid var(--am-border) !important;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.22) !important;
         color: var(--am-text) !important;
     }
-    div.stInfo svg { fill: var(--am-green) !important; }
-    div.stSuccess {
-        background: linear-gradient(135deg, rgba(0,163,146,0.18) 0%, rgba(0,82,75,0.32) 100%) !important;
+    div.stAlert p, div[data-testid="stAlert"] p,
+    div.stAlert span, div[data-testid="stAlert"] span,
+    div.stAlert label, div[data-testid="stAlert"] label {
+        color: var(--am-text) !important;
+    }
+
+    div.stInfo, div[data-testid="stAlert"][kind="info"] {
+        background: linear-gradient(135deg, rgba(0,102,95,0.5) 0%, rgba(0,70,65,0.6) 100%) !important;
         border-left: 4px solid var(--am-green) !important;
         border: 1px solid rgba(0,163,146,0.4) !important;
-        color: var(--am-text) !important;
     }
-    div.stSuccess svg { fill: var(--am-green) !important; }
-    div.stWarning {
-        background: linear-gradient(135deg, rgba(206,220,0,0.10) 0%, rgba(120,130,0,0.18) 100%) !important;
+    div.stInfo svg, div[data-testid="stAlert"][kind="info"] svg { fill: var(--am-green) !important; }
+
+    div.stSuccess, div[data-testid="stAlert"][kind="success"] {
+        background: linear-gradient(135deg, rgba(0,163,146,0.22) 0%, rgba(0,82,75,0.38) 100%) !important;
+        border-left: 4px solid var(--am-green) !important;
+        border: 1px solid rgba(0,163,146,0.45) !important;
+    }
+    div.stSuccess svg, div[data-testid="stAlert"][kind="success"] svg { fill: var(--am-green) !important; }
+
+    div.stWarning, div[data-testid="stAlert"][kind="warning"] {
+        background: linear-gradient(135deg, rgba(206,220,0,0.12) 0%, rgba(110,120,0,0.22) 100%) !important;
         border-left: 4px solid var(--am-lime) !important;
-        border: 1px solid rgba(206,220,0,0.35) !important;
-        color: var(--am-text) !important;
+        border: 1px solid rgba(206,220,0,0.4) !important;
     }
-    div.stWarning svg { fill: var(--am-lime) !important; }
-    div.stError { background: rgba(237,34,36,0.1) !important; border-left: 4px solid #ED2224 !important; border: 1px solid rgba(237,34,36,0.3) !important; }
+    div.stWarning svg, div[data-testid="stAlert"][kind="warning"] svg { fill: var(--am-lime) !important; }
+
+    div.stError, div[data-testid="stAlert"][kind="error"] {
+        background: rgba(237,34,36,0.12) !important;
+        border-left: 4px solid #ED2224 !important;
+        border: 1px solid rgba(237,34,36,0.35) !important;
+    }
+    div.stError svg, div[data-testid="stAlert"][kind="error"] svg { fill: #ED2224 !important; }
 
     .stButton > button { font-weight: 600; padding: 0.7em 1.3em; color: var(--am-text) !important; transition: all 0.25s ease; }
     .stButton > button:hover { background: var(--am-bg-card-hover) !important; transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,163,146,0.25); border-color: var(--am-green) !important; }
@@ -1540,8 +1587,7 @@ def construire_profil(histo, utz):
 
 def evaluer_contenu(item, profil, maintenant_tz):
     """
-    Retourne un score 0-100 de recommandation, et un flag d'alerte (deconseille).
-    item = un element d'une liste/watchlist (format Trakt)
+    Retourne un score 0-100 de recommandation, et des tags/alertes.
     """
     if item["type"] == "movie":
         med = item["movie"]
@@ -1550,25 +1596,26 @@ def evaluer_contenu(item, profil, maintenant_tz):
         annee = med.get("year")
         note = med.get("rating") or 0
         titre = med.get("title","")
+        votes = med.get("votes") or 0
+        status_txt = "ended"
+        nb_aired = 1
     elif item["type"] == "show":
         med = item["show"]
-        # Pour une serie, on estime la duree totale par nombre de saisons/episodes
-        # Comme on n'a pas ces infos sans appel sup, on estime a runtime par defaut * nb episodes moyen
         ep_dur = med.get("runtime") or 40
         nb_aired = med.get("aired_episodes") or 0
+        status_txt = med.get("status") or ""
         if nb_aired > 0:
             duree = ep_dur * nb_aired
         else:
-            # Estimation grossiere si pas de donnee
             duree = ep_dur * 50
         genres = med.get("genres") or []
         annee = med.get("year")
         note = med.get("rating") or 0
         titre = med.get("title","")
+        votes = med.get("votes") or 0
     else:
         return None
 
-    # Score de recommandation (0-100)
     score = 0.0
     raisons = []
     points_noirs = []
@@ -1585,51 +1632,80 @@ def evaluer_contenu(item, profil, maintenant_tz):
     # 2. Note moyenne du contenu (25 points max)
     if note > 0:
         score += min((note/10)*25, 25)
-        if note >= 8.0:
+        if note >= 9.0:
+            raisons.append(f"Pépite critique ({note:.1f}/10)")
+        elif note >= 8.0:
             raisons.append(f"Très bien noté ({note:.1f}/10)")
         elif note < 5.0:
             points_noirs.append(f"Note faible ({note:.1f}/10)")
+    if votes >= 100000:
+        raisons.append("Très populaire")
+    elif votes >= 10000:
+        raisons.append("Apprécié du public")
 
-    # 3. Recence de la sortie (15 points max) : on favorise les sorties recentes que tu
-    #    as probablement ajoutees expres SAUF si ton profil est tourne vers les classiques
+    # 3. Recence / classiques
     if annee:
         age = maintenant_tz.year - annee
-        if age <= 2:
+        if age <= 1:
+            score += 18
+            raisons.append("Toute dernière sortie")
+        elif age <= 2:
             score += 15
             raisons.append("Sortie récente")
         elif age <= 10:
             score += 8
-        elif age > 30:
-            # Points bonus si tu regardes beaucoup de vieux, sinon negatif
+        elif age >= 40:
             if profil["decennies"].get((annee//10)*10,0) > 50:
-                score += 10
-                raisons.append("Un classique qui correspond à tes goûts")
+                score += 12
+                raisons.append("Classique qui correspond à tes goûts")
             else:
-                score += 2
+                score += 1
+        if age >= 30 and note >= 7.5:
+            raisons.append("Classique incontournable")
 
-    # 4. Duree necessaire (10 points) : on favorise les contenus rapides a regarder
-    #    si tu n'as pas beaucoup de temps, films plutot que series longues
+    # 4. Duree
     if item["type"] == "movie":
-        if duree and duree <= 100:
+        if duree and duree <= 90:
+            score += 12
+            raisons.append("Film très court (< 1h30)")
+        elif duree and duree <= 100:
             score += 10
             raisons.append("Film rapide (< 1h40)")
-        elif duree and duree <= 140:
-            score += 6
+        elif duree and duree <= 120:
+            score += 5
+        elif duree and duree >= 200:
+            points_noirs.append(f"Film très long ({format_minutes(duree)})")
+            score -= 8
+        elif duree and duree >= 160:
+            points_noirs.append(f"Film long ({format_minutes(duree)})")
+            score -= 3
     else:
-        # Serie : plus il y a d'episodes, plus c'est un engagement
-        ep_dur = med.get("runtime") or 40
-        nb_aired = med.get("aired_episodes") or 0
         if nb_aired <= 6:
-            score += 8
+            score += 10
             raisons.append("Mini-série rapide à finir")
+        elif nb_aired <= 13:
+            score += 7
+            raisons.append("Saison courte (1 saison)")
         elif nb_aired <= 25:
             score += 5
             raisons.append("Série courte")
-        elif nb_aired >= 200:
-            score -= 5
+        elif nb_aired >= 300:
+            score -= 12
             points_noirs.append(f"Gros engagement ({nb_aired} épisodes)")
+        elif nb_aired >= 150:
+            score -= 6
+            points_noirs.append(f"Série longue ({nb_aired} épisodes)")
+        elif nb_aired >= 200:
+            score -= 4
+            points_noirs.append(f"Engagement important ({nb_aired} épisodes)")
+        if status_txt == "ended":
+            raisons.append("Série terminée (pas d'attente)")
+        elif status_txt == "returning" or status_txt == "in production":
+            raisons.append("Série en cours de diffusion")
+        elif status_txt == "canceled":
+            points_noirs.append("Série annulée")
 
-    # 5. Ajoute recemment dans la liste (10 points max)
+    # 5. Ajout dans la liste
     listed_at = item.get("_listed_at")
     anciennete_jours = None
     if listed_at:
@@ -1637,23 +1713,26 @@ def evaluer_contenu(item, profil, maintenant_tz):
             dt_l = pd.to_datetime(listed_at, utc=True).tz_convert(maintenant_tz.tzinfo)
             delta = maintenant_tz - dt_l.to_pydatetime()
             anciennete_jours = delta.days
-            if anciennete_jours <= 14:
+            if anciennete_jours <= 7:
+                score += 12
+            elif anciennete_jours <= 14:
                 score += 10
+            elif anciennete_jours > 730:
+                score -= 25
+                points_noirs.append("Ajouté il y a plus de 2 ans, tu as probablement oublié")
             elif anciennete_jours > 365:
                 score -= 20
-                points_noirs.append(f"Ajouté il y a plus d'un an, tu as probablement oublié")
+                points_noirs.append("Ajouté il y a plus d'un an")
             elif anciennete_jours > 180:
                 score -= 10
                 points_noirs.append("Ajouté il y a longtemps")
         except:
             pass
 
-    # Contenu deconseille si score bas OU points noirs importants
-    deconseille = (score < 35) or (len(points_noirs) >= 2)
-    if deconseille and score > 35 and len(points_noirs) < 2:
-        deconseille = False
+    # Ne correspond pas a mon profil si score bas OU points noirs importants
+    pas_pour_moi = (score < 35) or (len(points_noirs) >= 2)
 
-    # Le temps necessaire en format lisible
+    # Format duree
     if item["type"] == "movie":
         temps_necessaire = format_minutes(duree) if duree else "inconnu"
     else:
@@ -1666,52 +1745,56 @@ def evaluer_contenu(item, profil, maintenant_tz):
         "annee": annee,
         "note": round(note,1) if note else None,
         "genres": ", ".join(genres) if genres else "Inconnu",
+        "genres_liste": genres,
         "temps": temps_necessaire,
         "duree_min": duree,
         "score": max(0, min(round(score,1), 100)),
         "raisons": raisons,
         "averti": points_noirs,
-        "deconseille": deconseille,
+        "pas_pour_moi": pas_pour_moi,
         "tmdb": med["ids"].get("tmdb"),
         "ajout": anciennete_jours,
+        "votes": votes,
+        "nb_episodes": nb_aired if item["type"] == "show" else 0,
+        "status": status_txt,
     }
+
 
 def page_quoi_regarder(utz):
     if bloc_lancement(): return
     st.subheader("🎯 Que regarder ?")
-    st.caption("Sélectionne une liste et laisse-moi te recommander le prochain contenu à regarder, selon tes goûts, ton historique et tes notes. Fini le scroll infini !")
+    st.caption("Sélectionne une liste, applique tes filtres et laisse-moi te recommander le prochain contenu à regarder selon TES goûts. Fini le scroll infini !")
 
     h = st.session_state["historique"]
     profil = construire_profil(h, utz)
 
-    # Construire la liste des listes disponibles (watchlist + listes custom)
+    # Construire la liste des listes disponibles
     listes_dispo = [("👀 Liste de suivi", "watchlist")]
     for s in st.session_state["stats"]:
         if s["nom"] != "Liste de suivi":
             listes_dispo.append((f"📋 {s['nom']}", s["nom"]))
 
-    choix_label = st.selectbox("Choisis une liste", [l[0] for l in listes_dispo])
+    col_l, col_t = st.columns([1,1])
+    with col_l:
+        choix_label = st.selectbox("📋 Liste à explorer", [l[0] for l in listes_dispo])
+    with col_t:
+        type_f = st.selectbox("🎞️ Type de contenu", ["Tous", "Films seulement", "Séries seulement"])
     lid_nom = dict(listes_dispo)[choix_label]
 
-    # Recuperer les items de cette liste
+    # Recuperer les items
     at = st.session_state["access_token"]
     with st.spinner("Analyse intelligente de la liste..."):
         if lid_nom == "watchlist":
-            items = recuperer_watchlist(at) if "wl_qg" not in st.session_state else st.session_state.wl_qg
-            st.session_state.wl_qg = items
+            items = recuperer_watchlist(at)
         else:
-            # Chercher l'id de la liste
             l_id = None
             for l in recuperer_listes(at):
                 if l["name"] == lid_nom:
-                    l_id = l["ids"]["trakt"]
-                    break
+                    l_id = l["ids"]["trakt"]; break
             if not l_id:
                 st.warning("Liste introuvable."); return
             items = recuperer_contenu_liste(at, l_id)
 
-        # Exclure les contenus deja vus (sauf ceux ajoutes apres visionnage pour rewatch)
-        # On va utiliser res pour trouver les deja-vus
         deja_vus_tids = set()
         for r in st.session_state["res"]:
             if not r.get("ajoute_apres", False):
@@ -1722,9 +1805,9 @@ def page_quoi_regarder(utz):
         for it in items:
             ev = evaluer_contenu(it, profil, mt)
             if not ev: continue
-            # Type converti pour correspondre a deja_vus
-            cle = (ev["type"], it[it["type"].lower() if it["type"] != "show" else "show"]["ids"]["trakt"])
-            if cle in deja_vus_tids:
+            cle_type = ev["type"]
+            cle_tid = it["movie"]["ids"]["trakt"] if it["type"]=="movie" else it["show"]["ids"]["trakt"]
+            if (cle_type, cle_tid) in deja_vus_tids:
                 continue
             ev["_raw"] = it
             resultats.append(ev)
@@ -1733,45 +1816,100 @@ def page_quoi_regarder(utz):
         st.info("Aucun contenu à évaluer dans cette liste.")
         return
 
-    st.markdown(f"**{len(resultats)}** contenus à évaluer dans cette liste.")
+    # FILTRES
+    tous_genres = set()
+    for r in resultats:
+        tous_genres.update(r["genres_liste"])
+    tous_genres.discard("Inconnu"); tous_genres.discard("")
+
+    st.markdown("#### 🔎 Filtres")
+    cf1, cf2, cf3, cf4 = st.columns(4)
+    with cf1:
+        f_genre = st.selectbox("🎭 Genre", ["Tous"] + sorted(tous_genres))
+    with cf2:
+        f_note_min = st.select_slider("⭐ Note minimum", options=[0,5,6,7,7.5,8,8.5,9], value=0)
+    with cf3:
+        f_temps_max = st.selectbox("⏱️ Temps max à investir", ["Aucune limite", "Moins d'1h30 (film)", "Moins de 2h", "Moins de 3h", "Soirée (< 10h)", "Week-end (< 24h)"])
+    with cf4:
+        f_tri = st.selectbox("🔀 Trier par", ["✨ Pour moi (recommandé)", "⭐ Meilleures notes", "⏱️ Plus rapide à regarder", "🔥 Populaires", "🆕 Ajouté récemment", "📅 Nouveautés (sorties)", "🎬 Films d'abord", "📺 Séries d'abord", "🤔 Ne correspond pas à mon profil"])
+
+    # Appliquer les filtres
+    def limite_temps_ok(r):
+        if f_temps_max == "Aucune limite": return True
+        m = r["duree_min"]
+        if f_temps_max == "Moins d'1h30 (film)" and r["type"]=="Film": return m <= 90
+        if f_temps_max == "Moins de 2h" and r["type"]=="Film": return m <= 120
+        if f_temps_max == "Moins de 3h": return m <= 180
+        if f_temps_max == "Soirée (< 10h)": return m/60 <= 10
+        if f_temps_max == "Week-end (< 24h)": return m/60 <= 24
+        # si filtre film mais contenu serie => on exclut
+        if f_temps_max in ["Moins d'1h30 (film)", "Moins de 2h"] and r["type"]=="Série":
+            return False
+        return True
+
+    filtrés = []
+    for r in resultats:
+        if type_f == "Films seulement" and r["type"] != "Film": continue
+        if type_f == "Séries seulement" and r["type"] != "Série": continue
+        if f_genre != "Tous" and f_genre not in r["genres_liste"]: continue
+        if r["note"] is not None and r["note"] < f_note_min: continue
+        if not limite_temps_ok(r): continue
+        filtrés.append(r)
+
+    if not filtrés:
+        st.warning("Aucun contenu ne correspond à tes filtres.")
+        return
+
+    st.markdown(f"**{len(filtrés)}** contenus évalués.")
 
     # Tris
-    tri = st.radio("Trier par", ["✨ Recommandé pour moi", "⭐ Meilleures notes", "⏱️ Plus rapide à regarder", "🆕 Ajouté récemment", "⚠️ Déconseillés"], horizontal=True)
-
-    if tri == "✨ Recommandé pour moi":
-        resultats.sort(key=lambda x: -x["score"])
-        top = [r for r in resultats if r["score"] >= 50 and not r["deconseille"]]
-        bof = [r for r in resultats if 30 <= r["score"] < 50 and not r["deconseille"]]
-        dec = [r for r in resultats if r["deconseille"]]
+    if f_tri == "✨ Pour moi (recommandé)":
+        filtrés.sort(key=lambda x: -x["score"])
+        top = [r for r in filtrés if r["score"] >= 50 and not r["pas_pour_moi"]]
+        bof = [r for r in filtrés if 30 <= r["score"] < 50 and not r["pas_pour_moi"]]
+        bad = [r for r in filtrés if r["pas_pour_moi"]]
         sections = [("✨ Recommandations personnalisées", top, "rec"),
                     ("🤔 Pourquoi pas", bof, "mid"),
-                    ("⚠️ Déconseillés pour toi", dec, "bad")]
-    elif tri == "⭐ Meilleures notes":
-        resultats.sort(key=lambda x: -(x["note"] or 0))
-        sections = [("⭐ Par note", resultats, "note")]
-    elif tri == "⏱️ Plus rapide à regarder":
-        resultats.sort(key=lambda x: x["duree_min"])
-        sections = [("⏱️ Du plus rapide au plus long", resultats, "rapide")]
-    elif tri == "🆕 Ajouté récemment":
-        resultats.sort(key=lambda x: 999999 if x["ajout"] is None else x["ajout"])
-        sections = [("🆕 Derniers ajouts", resultats, "nouv")]
+                    ("🙅 Ne correspond pas à mon profil", bad, "bad")]
+    elif f_tri == "⭐ Meilleures notes":
+        filtrés.sort(key=lambda x: -(x["note"] or 0))
+        sections = [("⭐ Par note décroissante", filtrés, "mid")]
+    elif f_tri == "⏱️ Plus rapide à regarder":
+        filtrés.sort(key=lambda x: x["duree_min"])
+        sections = [("⏱️ Du plus rapide au plus long", filtrés, "mid")]
+    elif f_tri == "🔥 Populaires":
+        filtrés.sort(key=lambda x: -x["votes"])
+        sections = [("🔥 Les plus populaires", filtrés, "mid")]
+    elif f_tri == "🆕 Ajouté récemment":
+        filtrés.sort(key=lambda x: 999999 if x["ajout"] is None else x["ajout"])
+        sections = [("🆕 Derniers ajouts dans la liste", filtrés, "mid")]
+    elif f_tri == "📅 Nouveautés (sorties)":
+        filtrés.sort(key=lambda x: -(x["annee"] or 0))
+        sections = [("📅 Sorties les plus récentes", filtrés, "mid")]
+    elif f_tri == "🎬 Films d'abord":
+        films = sorted([r for r in filtrés if r["type"]=="Film"], key=lambda x: -x["score"])
+        series = sorted([r for r in filtrés if r["type"]=="Série"], key=lambda x: -x["score"])
+        sections = [("🎬 Films", films, "rec"), ("📺 Séries", series, "mid")]
+    elif f_tri == "📺 Séries d'abord":
+        series = sorted([r for r in filtrés if r["type"]=="Série"], key=lambda x: -x["score"])
+        films = sorted([r for r in filtrés if r["type"]=="Film"], key=lambda x: -x["score"])
+        sections = [("📺 Séries", series, "rec"), ("🎬 Films", films, "mid")]
     else:
-        resultats.sort(key=lambda x: x["score"])
-        sections = [("⚠️ Contenus déconseillés", [r for r in resultats if r["deconseille"]], "bad")]
+        filtrés.sort(key=lambda x: x["score"])
+        sections = [("🙅 Contenus qui ne correspondent pas à mon profil", [r for r in filtrés if r["pas_pour_moi"]], "bad")]
 
-    # Styles pour les cartes de recommandation
     st.markdown("""
     <style>
     .rec-card-rec { background: linear-gradient(135deg, rgba(0,163,146,0.20) 0%, rgba(0,82,75,0.35) 100%); border:1px solid rgba(0,163,146,0.4); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
     .rec-card-mid { background: rgba(8,55,50,0.55); border:1px solid rgba(18,90,84,0.4); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
-    .rec-card-bad { background: rgba(60,30,30,0.35); border:1px solid rgba(200,80,80,0.3); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
-    .rec-titre { font-size:1.1em; font-weight:700; color:#F0FAF8; margin-bottom:4px; }
-    .rec-meta { font-size:0.85em; color:#9DC5BF; margin-bottom:8px; }
-    .rec-score { font-size:1.4em; font-weight:800; color:#CEDC00; }
-    .rec-tag-ok { display:inline-block; padding:3px 10px; margin:2px 4px 2px 0; border-radius:12px; background:rgba(0,163,146,0.25); color:#7EE0D3; font-size:0.8em; font-weight:600; }
-    .rec-tag-warn { display:inline-block; padding:3px 10px; margin:2px 4px 2px 0; border-radius:12px; background:rgba(237,34,36,0.2); color:#FF9E9E; font-size:0.8em; font-weight:600; }
-    .rec-score-bar { height:6px; background:rgba(0,0,0,0.3); border-radius:3px; margin-top:6px; overflow:hidden; }
-    .rec-score-fill { height:100%; border-radius:3px; background: linear-gradient(90deg, #00524B, #00A392, #CEDC00); }
+    .rec-card-bad { background: rgba(80,35,20,0.35); border:1px solid rgba(180,110,40,0.35); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
+    .rec-titre { font-size:1.15em; font-weight:700; color:#F0FAF8; margin-bottom:4px; }
+    .rec-meta { font-size:0.88em; color:#9DC5BF; margin-bottom:8px; }
+    .rec-score { font-size:1.6em; font-weight:800; color:#CEDC00; line-height:1; }
+    .rec-tag-ok { display:inline-block; padding:4px 11px; margin:3px 4px 3px 0; border-radius:12px; background:rgba(0,163,146,0.25); color:#7EE0D3; font-size:0.82em; font-weight:600; }
+    .rec-tag-warn { display:inline-block; padding:4px 11px; margin:3px 4px 3px 0; border-radius:12px; background:rgba(210,130,40,0.22); color:#F2B670; font-size:0.82em; font-weight:600; }
+    .rec-score-bar { height:8px; background:rgba(0,0,0,0.3); border-radius:4px; margin-top:8px; overflow:hidden; }
+    .rec-score-fill { height:100%; border-radius:4px; background: linear-gradient(90deg, #00524B, #00A392, #CEDC00); }
     </style>
     """, unsafe_allow_html=True)
 
@@ -1779,10 +1917,9 @@ def page_quoi_regarder(utz):
         if not groupe: continue
         st.divider()
         st.markdown(f"### {nom_titre} ({len(groupe)})")
-        # Affichage par cartes colonnes pour chaque element
         for r in groupe:
             img = image_tmdb(r.get("tmdb"), "movie" if r["type"]=="Film" else "tv")
-            cimg, cc = st.columns([0.10, 0.90])
+            cimg, cc = st.columns([0.09, 0.91])
             with cimg:
                 if img:
                     st.image(img, use_container_width=True)
@@ -1792,14 +1929,15 @@ def page_quoi_regarder(utz):
                 an_part = f"({r['annee']})" if r.get('annee') else ""
                 aj_part = f"· 📥 Ajouté il y a {r['ajout']}j" if r['ajout'] is not None else ""
                 note_part = f"{r['note']}" if r['note'] else "?"
+                ep_part = f"· 📺 {r['nb_episodes']} ép." if r["type"]=="Série" and r["nb_episodes"]>0 else ""
                 st.markdown(f"""
                 <div class="rec-card-{cls}">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                        <div>
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                        <div style="flex:1;">
                             <div class="rec-titre">{r['type']} — {r['titre']} {an_part}</div>
-                            <div class="rec-meta">⭐ {note_part}<b>/10</b> · ⏱️ {r['temps']} · 🎭 {r['genres']} {aj_part}</div>
+                            <div class="rec-meta">⭐ {note_part}<b>/10</b> · ⏱️ {r['temps']} · 🎭 {r['genres']} {ep_part} {aj_part}</div>
                         </div>
-                        <div style="text-align:center;">
+                        <div style="text-align:center; min-width:60px;">
                             <div class="rec-score">{r['score']}</div>
                             <div style="font-size:0.7em; color:#9DC5BF;">/100</div>
                         </div>
@@ -1811,6 +1949,7 @@ def page_quoi_regarder(utz):
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+
 
 def page_wrapped():
     st.subheader("🎬 Rendez-vous annuel")
