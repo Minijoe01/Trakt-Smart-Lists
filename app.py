@@ -327,12 +327,17 @@ st.markdown("""
         background: linear-gradient(135deg, #00B8A5 0%, #006058 100%) !important;
         box-shadow: none !important;
     }
-    /* Forcer le telechargement a etre identique */
-    div[data-testid="stDownloadButton"] {
-        margin: 0 !important; padding: 0 !important;
-    }
-    div[data-testid="stDownloadButton"] > button {
-        margin: 0 !important;
+    /* Force explicitement le bouton Excel/telechargement à etre IDENTIQUE aux autres */
+    div[data-testid="stDownloadButton"] > button,
+    div[data-testid="stDownloadButton"] > button:hover,
+    div[data-testid="stDownloadButton"] > button:focus,
+    div[data-testid="stDownloadButton"] > button:active,
+    div[data-testid="stDownloadButton"] > button:visited {
+        background: rgba(5, 38, 34, 0.75) !important;
+        color: var(--am-text) !important;
+        border: 1px solid rgba(0,163,146,0.3) !important;
+        box-shadow: none !important;
+        opacity: 1 !important;
     }
 
     /* ANTI-OMBRE : forcer l'absence d'ombre sur TOUS les boutons, inputs, selects */
@@ -774,34 +779,45 @@ def generer_excel(pseudo, histo, res, stats, doub, pb, utz, at=None):
         ["Déjà vus",len(res)],["Doublons",len(doub)],["Fantômes",len(pb)]
     ], columns=["Statistique","Valeur"])
 
-    # Feuille Recommandations si access token disponible
-    df_reco = pd.DataFrame(columns=["Type","Titre","Année","Note","Genres","Temps nécessaire","Score /100","Pourquoi","Avertissements","Statut"])
+    # Feuille Recommandations (fusion watchlist + toutes les listes)
+    df_reco = pd.DataFrame(columns=["Type","Titre","Année","Note","Genres","Temps nécessaire","Score /100","Pourquoi","Avertissements","Statut","Liste"])
     if at is not None:
         try:
             profil = construire_profil(histo, utz)
             mt = datetime.now(utz)
-            items = recuperer_watchlist(at)
             deja_vus_tids = set((r["type"], r["tid"]) for r in res if not r.get("ajoute_apres", False))
             recos = []
-            for it in items:
-                ev = evaluer_contenu(it, profil, mt)
-                if not ev: continue
-                cle_type = ev["type"]
-                cle_tid = it["movie"]["ids"]["trakt"] if it["type"]=="movie" else it["show"]["ids"]["trakt"]
-                if (cle_type, cle_tid) in deja_vus_tids: continue
-                if ev["pas_pour_moi"]: continue
-                recos.append({
-                    "Type": ev["type"],
-                    "Titre": ev["titre"],
-                    "Année": ev["annee"],
-                    "Note": ev["note"],
-                    "Genres": ev["genres"],
-                    "Temps nécessaire": ev["temps"],
-                    "Score /100": ev["score"],
-                    "Pourquoi": " ; ".join(ev["raisons"]),
-                    "Avertissements": " ; ".join(ev["averti"]),
-                    "Statut": ev.get("status","") if ev["type"]=="Série" else ""
-                })
+            all_lists = [("Liste de suivi", recuperer_watchlist(at))]
+            try:
+                for l in recuperer_listes(at):
+                    try:
+                        items_l = recuperer_contenu_liste(at, l["ids"]["trakt"])
+                        all_lists.append((l["name"], items_l))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            for nom_liste, items in all_lists:
+                for it in items:
+                    ev = evaluer_contenu(it, profil, mt)
+                    if not ev: continue
+                    cle_type = ev["type"]
+                    cle_tid = it["movie"]["ids"]["trakt"] if it["type"]=="movie" else it["show"]["ids"]["trakt"]
+                    if (cle_type, cle_tid) in deja_vus_tids: continue
+                    if ev["pas_pour_moi"]: continue
+                    recos.append({
+                        "Type": ev["type"],
+                        "Titre": ev["titre"],
+                        "Année": ev["annee"],
+                        "Note": ev["note"],
+                        "Genres": ev["genres"],
+                        "Temps nécessaire": ev["temps"],
+                        "Score /100": ev["score"],
+                        "Pourquoi": " ; ".join(ev["raisons"]),
+                        "Avertissements": " ; ".join(ev["averti"]),
+                        "Statut": ev.get("status","") if ev["type"]=="Série" else "",
+                        "Liste": nom_liste,
+                    })
             df_reco = pd.DataFrame(recos).sort_values("Score /100", ascending=False)
         except Exception:
             pass
@@ -1960,7 +1976,8 @@ def page_quoi_regarder(utz):
     profil = construire_profil(h, utz)
 
     # Construire la liste des listes disponibles
-    listes_dispo = [("👀 Liste de suivi", "watchlist")]
+    listes_dispo = [("🌟 Toutes les listes confondues", "__ALL__"),
+                    ("👀 Liste de suivi", "watchlist")]
     for s in st.session_state["stats"]:
         if s["nom"] != "Liste de suivi":
             listes_dispo.append((f"📋 {s['nom']}", s["nom"]))
@@ -1977,13 +1994,27 @@ def page_quoi_regarder(utz):
     with st.spinner("Analyse intelligente de la liste..."):
         if lid_nom == "watchlist":
             items = recuperer_watchlist(at)
+        elif lid_nom == "__ALL__":
+            items = recuperer_watchlist(at)
+            try:
+                for l in recuperer_listes(at):
+                    try:
+                        items.extend(recuperer_contenu_liste(at, l["ids"]["trakt"]))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         else:
             l_id = None
             for l in recuperer_listes(at):
                 if l["name"] == lid_nom:
                     l_id = l["ids"]["trakt"]; break
             if not l_id:
-                st.warning("Liste introuvable."); return
+                st.markdown("""
+                <div style="background: rgba(237,34,36,0.12); border:1px solid rgba(237,34,36,0.35); border-radius:12px; padding:12px; color:#F0FAF8;">
+                ❌ Liste introuvable.
+                </div>""", unsafe_allow_html=True)
+                return
             items = recuperer_contenu_liste(at, l_id)
 
         deja_vus_tids = set()
@@ -2155,16 +2186,135 @@ def page_quoi_regarder(utz):
 
 def page_wrapped():
     st.subheader("🎬 Rendez-vous annuel")
-    st.markdown("""
-    <div style="background: rgba(0,102,95,0.35); border:1px solid rgba(0,163,146,0.3); border-radius:14px; padding:22px; color:#F0FAF8;">
-    🚧 Bientôt : récapitulatif annuel façon Spotify Wrapped.
+    st.caption("Ton récapitulatif annuel façon Wrapped. Sélectionne une année pour revivre ton année de visionnage.")
+
+    h = st.session_state["historique"]
+    utz = st.session_state["infos"]["tz"]
+    annee_actuelle = datetime.now(utz).year
+
+    # Construire le DataFrame complet
+    films = pd.DataFrame(h["films_det"])
+    eps = pd.DataFrame(h["ep_det"])
+    dfs = []
+    if not films.empty:
+        df = films.copy()
+        df["type_lib"] = "Film"
+        df["titre_lib"] = df["titre"]
+        df["date_dt"] = pd.to_datetime(df["date"], utc=True).dt.tz_convert(utz)
+        dfs.append(df[["date_dt","type_lib","titre_lib","genre","duree","note"]])
+    if not eps.empty:
+        df = eps.copy()
+        df["type_lib"] = "Épisode"
+        df["titre_lib"] = df["serie"]
+        df["date_dt"] = pd.to_datetime(df["date"], utc=True).dt.tz_convert(utz)
+        dfs.append(df[["date_dt","type_lib","titre_lib","genre","duree","note"]])
+    if not dfs:
+        st.markdown("""
+        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:18px; color:#F0FAF8;">
+        Aucune donnée à afficher.
+        </div>""", unsafe_allow_html=True)
+        return
+    df_all = pd.concat(dfs, ignore_index=True)
+    df_all["annee_vue"] = df_all["date_dt"].dt.year
+    df_all["mois_vue"] = df_all["date_dt"].dt.month
+    df_all["duree_h"] = df_all["duree"].fillna(0)/60
+
+    annees_dispo = sorted(df_all["annee_vue"].unique(), reverse=True)
+    annee = st.selectbox("📅 Choisis une année", annees_dispo, index=0)
+    df_y = df_all[df_all["annee_vue"] == annee].copy()
+
+    if df_y.empty:
+        st.info("Aucune donnée pour cette année.")
+        return
+
+    # --- KPI ---
+    total_h = df_y["duree_h"].sum()
+    nb_films = len(df_y[df_y["type_lib"]=="Film"]["titre_lib"].unique())
+    nb_eps = len(df_y[df_y["type_lib"]=="Épisode"])
+    nb_series = len(df_y[df_y["type_lib"]=="Épisode"]["titre_lib"].unique())
+    note_moy = df_y[df_y["note"]>0]["note"].mean() if (df_y["note"]>0).any() else 0
+    jour_peak = df_y.groupby(df_y["date_dt"].dt.date).size().idxmax()
+    nb_peak = df_y.groupby(df_y["date_dt"].dt.date).size().max()
+    jour_mois_peak = df_y.groupby(["mois_vue"]).size().idxmax()
+    nom_mois = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"][jour_mois_peak-1]
+
+    # Hero card
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(0,163,146,0.35) 0%, rgba(0,82,75,0.6) 100%);
+                border:1px solid rgba(0,163,146,0.5); border-radius:24px; padding:32px;
+                text-align:center; margin:20px 0;">
+        <div style="font-size:1em; color:#CEDC00; text-transform:uppercase; letter-spacing:3px; font-weight:700;">TON ANNÉE {annee}</div>
+        <div style="font-size:4em; font-weight:900; color:#fff; margin:10px 0;">{format_duree(total_h)}</div>
+        <div style="font-size:1.1em; color:#9DC5BF;">de visionnage cette année</div>
     </div>""", unsafe_allow_html=True)
+
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("🎬 Films uniques", nb_films)
+    c2.metric("📺 Séries suivies", nb_series)
+    c3.metric("🎞️ Épisodes", nb_eps)
+    c4.metric("⭐ Note moyenne", f"{round(note_moy,1)}/10" if note_moy else "-")
+
+    # Jour record et mois record
+    c5,c6 = st.columns(2)
+    c5.metric("🏆 Record en 1 jour", f"{nb_peak} visionnages", delta=jour_peak.strftime('%d/%m'))
+    c6.metric("📅 Ton plus gros mois", nom_mois)
+
+    # Top films
+    st.divider()
+    st.markdown(f"### 🎬 Tes films les plus vus en {annee}")
+    films_y = df_y[df_y["type_lib"]=="Film"]
+    top_films = films_y.groupby("titre_lib").agg(n=("duree_h","size"), note=("note","mean")).sort_values("n", ascending=False).head(5)
+    if not top_films.empty:
+        for i,(t,row) in enumerate(top_films.iterrows(),1):
+            note_txt = f"⭐ {round(row['note'],1)}/10" if pd.notna(row['note']) and row['note']>0 else ""
+            st.markdown(f"**#{i} — {t}**  ·  {int(row['n'])} visionnage{'s' if int(row['n'])>1 else ''}  ·  {note_txt}")
+    else:
+        st.caption("Aucun film vu cette année.")
+
+    # Top series
+    st.divider()
+    st.markdown(f"### 📺 Tes séries les plus suivies en {annee}")
+    eps_y = df_y[df_y["type_lib"]=="Épisode"]
+    top_series = eps_y.groupby("titre_lib").agg(eps=("duree_h","size"), note=("note","mean")).sort_values("eps", ascending=False).head(5)
+    if not top_series.empty:
+        for i,(t,row) in enumerate(top_series.iterrows(),1):
+            note_txt = f"⭐ {round(row['note'],1)}/10" if pd.notna(row['note']) and row['note']>0 else ""
+            st.markdown(f"**#{i} — {t}**  ·  {int(row['eps'])} épisodes  ·  {note_txt}")
+    else:
+        st.caption("Aucune série vue cette année.")
+
+    # Top genres
+    st.divider()
+    st.markdown(f"### 🎭 Tes genres préférés en {annee}")
+    genres_n = {}
+    for g in df_y["genre"].fillna("").str.split(", "):
+        for x in g:
+            if x and x != "Inconnu":
+                genres_n[x] = genres_n.get(x,0)+1
+    if genres_n:
+        top_genres = sorted(genres_n.items(), key=lambda x:-x[1])[:5]
+        cols = st.columns(min(5, len(top_genres)))
+        for i,(g,n) in enumerate(top_genres):
+            cols[i].metric(g, n)
+
+    # Graphique par mois
+    st.divider()
+    st.markdown(f"### 📊 Heures de visionnage par mois — {annee}")
+    h_mois = df_y.groupby("mois_vue")["duree_h"].sum().reindex(range(1,13), fill_value=0).round(1)
+    opt_m = {"title":{"text":f"Heures par mois en {annee}","textStyle":{"color":"#F0FAF8"},"left":"center"},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":nom_mois,"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"bar","itemStyle":{"color":"#CEDC00","borderRadius":[4,4,0,0]}}]}
+    st_echarts(opt_m, height="350px")
 
 def page_sauvegarde():
     st.subheader("📤 Sauvegarde et restauration")
     st.caption("Exporte toutes tes données (listes, historique, paramètres) dans un fichier JSON que tu peux conserver précieusement, ou restaure-les depuis un fichier précédent.")
 
     at = st.session_state["access_token"]
+    if "historique" not in st.session_state:
+        st.markdown("""
+        <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:18px; color:#F0FAF8; text-align:center;">
+        ℹ️ Lance d'abord l'analyse depuis le tableau de bord pour pouvoir sauvegarder tes données.
+        </div>""", unsafe_allow_html=True)
+        return
     h = st.session_state["historique"]
     res = st.session_state.get("res", [])
     stats = st.session_state.get("stats", [])
@@ -2211,14 +2361,20 @@ def page_sauvegarde():
     with cimp:
         st.markdown("#### 📥 Importer une sauvegarde")
         st.markdown("Restaure tes données depuis un fichier JSON exporté précédemment.")
-        st.warning("⚠️ L'import ne modifie PAS tes données sur Trakt, il recharge simplement les données dans l'application pour éviter une nouvelle analyse.")
+        st.markdown("""
+        <div style="background: rgba(206,220,0,0.12); border:1px solid rgba(206,220,0,0.35); border-radius:12px; padding:12px; color:#F0FAF8; font-size:0.9em; margin-bottom:12px;">
+        ⚠️ L'import ne modifie PAS tes données sur Trakt, il recharge simplement les données dans l'application pour éviter une nouvelle analyse.
+        </div>""", unsafe_allow_html=True)
         fichier = st.file_uploader("Choisis un fichier JSON", type=["json"])
         if fichier is not None:
             try:
                 import json
                 data = json.load(fichier)
                 if data.get("version") == 1:
-                    st.success(f"✅ Sauvegarde valide ! Pseudo : **{data.get('pseudo','inconnu')}**  • Export du {data.get('export_date','?')}")
+                    st.markdown(f"""
+                    <div style="background: rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:12px; padding:12px; color:#F0FAF8;">
+                    ✅ Sauvegarde valide ! Pseudo : <b>{data.get('pseudo','inconnu')}</b> • Export du {data.get('export_date','?')}
+                    </div>""", unsafe_allow_html=True)
                     if st.button("🔄 Restaurer dans l'application", type="primary", use_container_width=True):
                         if data.get("historique"): st.session_state["historique"] = data["historique"]
                         if data.get("stats_listes"): st.session_state["stats"] = data["stats_listes"]
@@ -2226,17 +2382,32 @@ def page_sauvegarde():
                         if data.get("doublons"): st.session_state["doub"] = data["doublons"]
                         if data.get("doublons_det"): st.session_state["doub_det"] = data["doublons_det"]
                         if data.get("fantomes"): st.session_state["pb"] = data["fantomes"]
-                        st.session_state["np"] = recuperer_lecture(at)
-                        st.success("✅ Données restaurées dans l'application !")
+                        try:
+                            st.session_state["np"] = recuperer_lecture(at)
+                        except Exception:
+                            pass
+                        st.markdown("""
+                        <div style="background: rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:12px; padding:12px; color:#F0FAF8;">
+                        ✅ Données restaurées dans l'application !
+                        </div>""", unsafe_allow_html=True)
                         st.rerun()
                 else:
-                    st.error("❌ Format de sauvegarde non reconnu.")
+                    st.markdown("""
+                    <div style="background: rgba(237,34,36,0.12); border:1px solid rgba(237,34,36,0.35); border-radius:12px; padding:12px; color:#F0FAF8;">
+                    ❌ Format de sauvegarde non reconnu.
+                    </div>""", unsafe_allow_html=True)
             except Exception as e:
-                st.error(f"❌ Erreur lors de la lecture du fichier : {e}")
+                st.markdown(f"""
+                <div style="background: rgba(237,34,36,0.12); border:1px solid rgba(237,34,36,0.35); border-radius:12px; padding:12px; color:#F0FAF8;">
+                ❌ Erreur lors de la lecture du fichier : {e}
+                </div>""", unsafe_allow_html=True)
 
     st.divider()
     st.markdown("#### ℹ️ À savoir")
-    st.info("Tes identifiants et tokens d'authentification ne sont JAMAIS inclus dans la sauvegarde pour des raisons de sécurité. Tu devras rester connecté après un refresh, et l'application refera simplement une récupération des données live (listes/playbacks) la prochaine fois si tu fais une analyse rapide.")
+    st.markdown("""
+    <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:14px 18px; color:#F0FAF8; font-size:0.95em;">
+    Tes identifiants et tokens d'authentification ne sont JAMAIS inclus dans la sauvegarde pour des raisons de sécurité. Tu devras rester connecté après un refresh, et l'application refera simplement une récupération des données live (listes/playbacks) la prochaine fois si tu fais une analyse rapide.
+    </div>""", unsafe_allow_html=True)
 
 # ==================================================
 # RECONNEXION AUTO
