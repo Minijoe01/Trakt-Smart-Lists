@@ -638,7 +638,9 @@ def recuperer_watchlist(at):
 
 def recuperer_lecture(at):
     try:
-        r = requests.get("https://api.trakt.tv/users/me/watching", headers=entetes(at), timeout=8)
+        # IL FAUT extended=full pour recuperer le runtime et les slugs des contenus !
+        r = requests.get("https://api.trakt.tv/users/me/watching", headers=entetes(at),
+                        params={"extended": "full"}, timeout=8)
         if r.status_code == 204: return None
         return r.json() if r.status_code == 200 else None
     except Exception:
@@ -727,11 +729,13 @@ def recuperer_playback(at, barre=None):
     if barre: barre.progress(0.95, text="Recherche des fantômes...")
     res = []
     try:
-        r = requests.get("https://api.trakt.tv/sync/playback", headers=entetes(at), timeout=15)
+        r = requests.get("https://api.trakt.tv/sync/playback", headers=entetes(at),
+                         params={"extended": "full"}, timeout=15)
         r.raise_for_status()
-        vus = set()  # DEDUPLICATION : eviter les doublons (meme titre, meme progression)
+        vus = set()  # DEDUPLICATION : eviter les doublons
         for it in r.json():
             try:
+                lien_trakt = None
                 if it["type"] == "movie" and it.get("movie"):
                     m = it["movie"]
                     t = m["title"]
@@ -740,6 +744,11 @@ def recuperer_playback(at, barre=None):
                     duree = m.get("runtime",0) or 0
                     tmdb = m["ids"].get("tmdb")
                     cle = ("m", m["ids"].get("trakt", t))
+                    slug = m.get("slug") or m["ids"].get("slug")
+                    if slug:
+                        lien_trakt = f"https://trakt.tv/movies/{slug}"
+                    else:
+                        lien_trakt = f"https://trakt.tv/movies/{m['ids'].get('trakt','')}"
                 elif it["type"] == "episode" and it.get("show") and it.get("episode"):
                     ep = it["episode"]
                     sh = it["show"]
@@ -749,11 +758,17 @@ def recuperer_playback(at, barre=None):
                     duree = ep.get("runtime",0) or sh.get("runtime",0) or 0
                     tmdb = sh["ids"].get("tmdb")
                     cle = ("e", sh["ids"].get("trakt", t), ep.get("season",0), ep.get("number",0))
+                    slug = sh.get("slug") or sh["ids"].get("slug")
+                    if slug:
+                        lien_trakt = f"https://trakt.tv/shows/{slug}/seasons/{ep['season']}/episodes/{ep['number']}"
+                    else:
+                        lien_trakt = f"https://trakt.tv/shows/{sh['ids'].get('trakt','')}/seasons/{ep['season']}/episodes/{ep['number']}"
                 else: continue
                 if cle in vus: continue  # skip doublon
                 vus.add(cle)
                 prog = round(it.get("progress",0) or 0)
-                res.append({"type":ty,"titre":t,"annee":a,"prog":prog,"dernier":it["paused_at"],"pid":it["id"],"duree":duree,"tmdb":tmdb})
+                res.append({"type":ty,"titre":t,"annee":a,"prog":prog,"dernier":it["paused_at"],
+                            "pid":it["id"],"duree":duree,"tmdb":tmdb,"lien":lien_trakt})
             except Exception:
                 continue
         res.sort(key=lambda x: x["dernier"])
@@ -1075,7 +1090,8 @@ def bloc_lancement():
 
 def page_lecture(utz):
     """Page En cours de lecture : SEULEMENT 1 appel API (recuperer_lecture),
-    ne necessite PAS d'analyse complete pour fonctionner — evite les crashs."""
+    ne necessite PAS d'analyse complete pour fonctionner — evite les crashs.
+    Affiche progression, temps ecoule, temps restant, heure de fin, lien Trakt."""
     st.subheader("▶️ En cours de lecture")
     at = st.session_state["access_token"]
     # Rafraichir la lecture en temps reel a chaque visite (1 appel ultra-rapide)
@@ -1093,84 +1109,161 @@ def page_lecture(utz):
         </div>""", unsafe_allow_html=True)
         return
     try:
-        if np["type"] == "movie":
+        # --- Recuperer les infos du contenu ---
+        started_at = np.get("started_at")
+        expires_at = np.get("expires_at")
+        action_at = started_at or np.get("paused_at")
+
+        is_episode = (np["type"] == "episode")
+        if is_episode:
+            med_show = np.get("show", {})
+            med_ep = np.get("episode", {})
+            titre_show = med_show.get("title", "Série inconnue")
+            saison = med_ep.get("season", 0)
+            numero = med_ep.get("number", 0)
+            ep_titre = med_ep.get("title", "")
+            titre = f"{titre_show} — S{saison:02d}E{numero:02d}"
+            if ep_titre:
+                titre += f" — {ep_titre}"
+            annee = med_show.get("year")
+            tc = "Épisode"
+            # Duree : priorite a l'episode, sinon la serie, sinon 0
+            duree = (med_ep.get("runtime") or med_show.get("runtime") or 0)
+            tmdb = med_show.get("ids", {}).get("tmdb")
+            trakt_id = med_show.get("ids", {}).get("trakt")
+            # Slug est au niveau racine du show/movie dans la reponse Trakt extended
+            slug_show = med_show.get("slug") or med_show.get("ids", {}).get("slug")
+            # Lien Trakt : slug prioritaire, sinon ID numerique qui marche toujours
+            if slug_show:
+                lien_trakt = f"https://trakt.tv/shows/{slug_show}/seasons/{saison}/episodes/{numero}"
+            elif trakt_id:
+                lien_trakt = f"https://trakt.tv/shows/{trakt_id}/seasons/{saison}/episodes/{numero}"
+            else:
+                lien_trakt = None
+        else:
             med = np.get("movie", {})
             titre = med.get("title", "Film inconnu")
             annee = med.get("year")
             tc = "Film"
-            duree = med.get("runtime", 0) or 0
+            duree = med.get("runtime") or 0
             tmdb = med.get("ids", {}).get("tmdb")
-        else:
-            med = np.get("show", {})
-            ep = np.get("episode", {})
-            ep_titre = f"S{ep.get('season',0):02d}E{ep.get('number',0):02d}"
-            if ep.get("title"):
-                ep_titre += f" — {ep['title']}"
-            titre = f"{med.get('title','Série')} — {ep_titre}"
-            annee = med.get("year")
-            tc = "Épisode"
-            duree = ep.get("runtime", 0) or med.get("runtime", 0) or 0
-            tmdb = med.get("ids", {}).get("tmdb")
-        prog = round(np.get("progress", 0) or 0)
+            trakt_id = med.get("ids", {}).get("trakt")
+            slug = med.get("slug") or med.get("ids", {}).get("slug")
+            lien_trakt = f"https://trakt.tv/movies/{slug}" if slug else (f"https://trakt.tv/movies/{trakt_id}" if trakt_id else None)
 
-        # Calcul temps : started_at est present, duree peut etre 0 pour des films pas sortis (ex: Toy Story 5)
-        started_at = np.get("started_at")
+        # --- Calcul de la progression et des temps ---
+        # Trakt renvoie 'progress' directement si disponible, sinon on le calcule
+        prog = float(np.get("progress") or 0)
         debut = None
         fin = None
-        if started_at:
+        temps_ecoule_str = ""
+        temps_restant_str = ""
+
+        if action_at:
             try:
-                debut = datetime.fromisoformat(started_at.replace("Z","+00:00")).astimezone(utz)
+                debut = datetime.fromisoformat(action_at.replace("Z","+00:00")).astimezone(utz)
             except Exception:
                 debut = None
+
+        # Si on a le debut ET une duree, on calcule tout
         if debut and duree and duree > 0:
+            maintenant_local = datetime.now(utz)
+            ecoule_sec = max(0, (maintenant_local - debut).total_seconds())
+            ecoule_min = ecoule_sec / 60
+            # Progression recalculee a la seconde pres (plus frais que celle renvoyee par Trakt)
+            prog = min(100.0, (ecoule_min / duree) * 100)
+            restant_min = max(0, duree - ecoule_min)
             fin = debut + timedelta(minutes=duree)
 
-        img = image_tmdb(tmdb, "movie" if tc=="Film" else "tv") if tmdb else None
+            # Formatage temps
+            if ecoule_min >= 60:
+                eh = int(ecoule_min // 60)
+                em = int(round(ecoule_min % 60))
+                temps_ecoule_str = f"{eh}h{em:02d}"
+            else:
+                temps_ecoule_str = f"{int(round(ecoule_min))}min"
+            if restant_min >= 60:
+                rh = int(restant_min // 60)
+                rm = int(round(restant_min % 60))
+                temps_restant_str = f"{rh}h{rm:02d}"
+            else:
+                temps_restant_str = f"{int(round(restant_min))}min"
+        elif not duree or duree <= 0:
+            # Pas de runtime dans la reponse : fallback si on a expires_at
+            if debut and expires_at:
+                try:
+                    fin = datetime.fromisoformat(expires_at.replace("Z","+00:00")).astimezone(utz)
+                    duree = max(1, int((fin - debut).total_seconds()/60))
+                    maintenant_local = datetime.now(utz)
+                    ecoule_min = max(0, (maintenant_local - debut).total_seconds()/60)
+                    prog = min(100.0, (ecoule_min / duree) * 100)
+                    restant_min = max(0, duree - ecoule_min)
+                    temps_ecoule_str = f"{int(round(ecoule_min))}min"
+                    temps_restant_str = f"{int(round(restant_min))}min"
+                except Exception:
+                    pass
+
+        # --- Affichage ---
+        img = image_tmdb(tmdb, "tv" if is_episode else "movie") if tmdb else None
         ci, cd = st.columns([0.2,0.8])
         with ci:
             if img:
                 try: st.image(img, use_container_width=True)
-                except Exception: st.markdown("🎬" if tc=="Film" else "📺")
+                except Exception: st.markdown("📺" if is_episode else "🎬")
             else:
-                st.markdown("🎬" if tc=="Film" else "📺")
+                st.markdown("📺" if is_episode else "🎬")
         with cd:
-            # Cas ou la duree est inconnue (film pas sorti par exemple)
-            if duree <= 0:
-                duree_aff = "Pas encore disponible"
-                fin_aff = "Inconnue"
-                prog_aff = f"{prog}%"
-            else:
-                duree_aff = format_minutes(duree)
-                fin_aff = fin.strftime('%H:%M') if fin else "Inconnue"
-                prog_aff = f"{prog}%"
+            duree_aff = format_minutes(duree) if duree and duree > 0 else "Calcul en cours..."
+            fin_aff = fin.strftime('%H:%M') if fin else "Calcul en cours..."
+            debut_aff = debut.strftime('%H:%M:%S') if debut else "Inconnue"
+            # Couleur barre selon progression
+            if prog < 30: cls = "progress-low"
+            elif prog < 80: cls = "progress-mid"
+            else: cls = "progress-high"
+
+            lien_html = ""
+            if lien_trakt:
+                lien_html = f'<a href="{lien_trakt}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.85em; margin-left:8px;">🔗 Voir sur Trakt</a>'
+
             st.markdown(f"""
             <div class="now-playing-card">
                 <div style="font-size:0.85em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">▶️ EN LECTURE</div>
-                <div style="font-size:1.8em; font-weight:800; color:#F0FAF8; margin-bottom:8px;">{titre}</div>
-                <div style="font-size:1em; color:#9DC5BF; margin-bottom:16px;">{tc} {f'({annee})' if annee else ''}</div>
+                <div style="font-size:1.7em; font-weight:800; color:#F0FAF8; margin-bottom:4px;">{titre}</div>
+                <div style="font-size:1em; color:#9DC5BF; margin-bottom:16px;">{tc} {f'({annee})' if annee else ''} {lien_html}</div>
                 <div class="progress-bar-container" style="height:14px; margin-bottom:16px;">
-                    <div class="progress-bar-fill progress-high" style="width:{max(min(prog,100),0)}%"></div>
+                    <div class="progress-bar-fill {cls}" style="width:{round(prog,1)}%"></div>
                 </div>
-                <div style="display:grid; grid-template-columns: repeat(2,1fr); gap:14px;">
+                <div style="display:grid; grid-template-columns: repeat(3,1fr); gap:14px;">
                     <div>
-                        <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Début</div>
-                        <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{debut.strftime('%H:%M:%S') if debut else 'Inconnu'}</div>
+                        <div style="font-size:0.75em; color:#9DC5BF; text-transform:uppercase;">Début</div>
+                        <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{debut_aff}</div>
                     </div>
                     <div>
-                        <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Fin estimée</div>
-                        <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{fin_aff}</div>
+                        <div style="font-size:0.75em; color:#9DC5BF; text-transform:uppercase;">Fin estimée</div>
+                        <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{fin_aff}</div>
                     </div>
                     <div>
-                        <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Durée</div>
-                        <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{duree_aff}</div>
+                        <div style="font-size:0.75em; color:#9DC5BF; text-transform:uppercase;">Progression</div>
+                        <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{round(prog)}%</div>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns: repeat(2,1fr); gap:14px; margin-top:14px;">
+                    <div>
+                        <div style="font-size:0.75em; color:#9DC5BF; text-transform:uppercase;">Durée</div>
+                        <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{duree_aff}</div>
                     </div>
                     <div>
-                        <div style="font-size:0.8em; color:#9DC5BF; text-transform:uppercase;">Progression</div>
-                        <div style="font-size:1.1em; font-weight:600; color:#F0FAF8;">{prog_aff}</div>
+                        <div style="font-size:0.75em; color:#9DC5BF; text-transform:uppercase;">⏱️ Déjà regardé</div>
+                        <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{temps_ecoule_str or '-'}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.75em; color:#9DC5BF; text-transform:uppercase;">⏳ Restant</div>
+                        <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{temps_restant_str or '-'}</div>
                     </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
+            st.caption("La page se rafraîchit automatiquement. Les temps sont calculés en direct selon ton fuseau horaire.")
     except Exception as e:
         st.error(f"Erreur d'affichage de la lecture : {e}")
 
@@ -1422,9 +1515,11 @@ def page_fantomes(utz):
                     if img:
                         st.image(img, use_container_width=True)
                 with cd:
+                    lien = it.get("lien")
+                    lien_html = f'<a href="{lien}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.85em; margin-left:8px;">🔗 Trakt</a>' if lien else ""
                     st.markdown(f"""
                     <div class="ghost-card">
-                        <div class="ghost-title">{ic} {it['titre']} {f'({it["annee"]})' if it["annee"] else ''}</div>
+                        <div class="ghost-title">{ic} {it['titre']} {f'({it["annee"]})' if it["annee"] else ''} {lien_html}</div>
                         <div class="ghost-meta">{it['type']} • {p}% visionné • 🕒 {df}</div>
                         <div class="progress-bar-container">
                             <div class="progress-bar-fill {cls}" style="width:{p}%"></div>
