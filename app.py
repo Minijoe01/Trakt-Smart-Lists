@@ -59,7 +59,7 @@ st.markdown("""
         --am-green: #00A392;
         --am-green-aston: #00524B;
         --am-green-dark: #021412;
-        --am-lime: #CEDC00;
+        --am-lime: #00D084;
         --am-bg-card: rgba(8, 55, 50, 0.75);
         --am-bg-card-hover: rgba(12, 75, 68, 0.85);
         --am-border: rgba(18, 90, 84, 0.5);
@@ -67,35 +67,110 @@ st.markdown("""
         --am-text-muted: #9DC5BF;
     }
 
-    /* On garde le ruban Streamlit visible, mais on l'harmonise et on ajoute de la marge
-       pour que le scroll ne passe pas dessous */
-    section[data-testid="stSidebar"] > div:first-child { padding-top: 0 !important; }
+    /* On garde le ruban Streamlit visible, marge en haut pour pas que le contenu passe dessous */
     footer {visibility: hidden;}
-    .stApp { margin-top: 0; padding-top: 0; }
     .block-container {
-        padding-top: 3.5rem !important;
+        padding-top: 4rem !important;
     }
 
-    /* FOND ASTON MARTIN 2026 - Diffusion radiale en "tache d'encre" depuis le centre/haut :
-       - le centre est un peu plus clair (vert moyen mat)
-       - les cotes gauche/droite et le bas s'assombrissent PROGRESSIVEMENT
-       - pas de "point lumineux" vif comme un spot, une diffusion tres douce
-       - les cotes sont plus sombres que le centre, le bas plus sombre que le haut */
+    /* FOND : UN SEUL degradé radial, partant du centre-haut (plus clair) et
+       s'assombrissant VERS LES BORDS et VERS LE BAS, sans jamais repasser par du clair.
+       Pas de sur-couches qui créent des retours au clair ou des lignes. */
     .stApp {
-        background:
-            /* assombrissement doux sur le bord gauche */
-            radial-gradient(ellipse 50% 100% at 0% 50%, rgba(1,22,20,0.55) 0%, transparent 60%),
-            /* assombrissement doux sur le bord droit */
-            radial-gradient(ellipse 50% 100% at 100% 50%, rgba(1,22,20,0.55) 0%, transparent 60%),
-            /* assombrissement par le bas */
-            radial-gradient(ellipse 100% 50% at 50% 100%, rgba(1,22,20,0.85) 0%, rgba(1,22,20,0.3) 60%, transparent 100%),
-            /* leger eclairage qui part du centre-haut, tres diffus, pas vif */
-            radial-gradient(ellipse 100% 70% at 50% 0%, rgba(0,95,87,1) 0%, rgba(0,78,72,0.9) 30%, rgba(0,55,51,0.7) 60%, transparent 85%),
-            /* couleur de base : vert moyen mat */
-            #00554D !important;
+        background: radial-gradient(
+            ellipse 100% 85% at 50% 0%,
+            #006B62 0%,
+            #005951 28%,
+            #00443E 55%,
+            #002B28 80%,
+            #011715 100%
+        ) !important;
         background-attachment: fixed !important;
         min-height: 100vh;
     }
+
+    /* Supprimer toutes les ombres grossières demandées */
+    div[data-testid="stMetric"],
+    div.stAlert,
+    div[data-testid="stContainer"],
+    div.stButton > button,
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div,
+    div[data-testid="stDataFrame"],
+    div[data-testid="stSlider"] > div,
+    div[data-testid="stSelectSlider"] > div,
+    div[data-testid="stDownloadButton"] > button {
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+
+    /* On garde juste un contour subtil pour que les widgets ne se fondent pas dans le fond, SANS ombre */
+    div[data-testid="stMetric"],
+    div[data-testid="stContainer"],
+    div.stButton > button,
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div,
+    div[data-testid="stDataFrame"],
+    div[data-testid="stSlider"] > div {
+        background-color: rgba(8, 55, 50, 0.45) !important;
+        backdrop-filter: blur(14px) !important;
+        -webkit-backdrop-filter: blur(14px) !important;
+        border-radius: 16px !important;
+        border: 1px solid rgba(255,255,255,0.07) !important;
+    }
+
+    /* Select et inputs : un peu plus de contraste, toujours sans ombre */
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div {
+        background: rgba(3, 30, 27, 0.55) !important;
+        border: 1px solid rgba(0,163,146,0.25) !important;
+    }
+    div[data-baseweb="select"] > div:hover,
+    div[data-baseweb="input"] > div:hover {
+        border-color: rgba(0,163,146,0.5) !important;
+    }
+
+    /* Messages d'alerte : PAS D'OMBRE */
+    div.stAlert, div[data-testid="stAlert"] {
+        background-color: rgba(8, 55, 50, 0.45) !important;
+        backdrop-filter: blur(14px) !important;
+        -webkit-backdrop-filter: blur(14px) !important;
+        border-radius: 16px !important;
+        border: 1px solid rgba(255,255,255,0.07) !important;
+        box-shadow: none !important;
+        color: var(--am-text) !important;
+    }
+    div.stAlert p, div[data-testid="stAlert"] p,
+    div.stAlert span, div[data-testid="stAlert"] span,
+    div.stAlert label, div[data-testid="stAlert"] label {
+        color: var(--am-text) !important;
+    }
+
+    div.stInfo, div[data-testid="stAlert"][kind="info"] {
+        background: rgba(0,102,95,0.35) !important;
+        border: 1px solid rgba(0,163,146,0.3) !important;
+    }
+    div.stInfo svg, div[data-testid="stAlert"][kind="info"] svg { fill: var(--am-green) !important; }
+
+    div.stSuccess, div[data-testid="stAlert"][kind="success"] {
+        background: rgba(0,163,146,0.15) !important;
+        border: 1px solid rgba(0,163,146,0.35) !important;
+    }
+    div.stSuccess svg, div[data-testid="stAlert"][kind="success"] svg { fill: var(--am-green) !important; }
+
+    /* WARNINGS : comme tu l'as demande, #00D084 */
+    div.stWarning, div[data-testid="stAlert"][kind="warning"] {
+        background: rgba(0,208,132,0.12) !important;
+        border-left: 4px solid #00D084 !important;
+        border: 1px solid rgba(0,208,132,0.35) !important;
+    }
+    div.stWarning svg, div[data-testid="stAlert"][kind="warning"] svg { fill: #00D084 !important; }
+
+    div.stError, div[data-testid="stAlert"][kind="error"] {
+        background: rgba(237,34,36,0.10) !important;
+        border: 1px solid rgba(237,34,36,0.35) !important;
+    }
+    div.stError svg, div[data-testid="stAlert"][kind="error"] svg { fill: #ED2224 !important; }
 
     /* Badges obtenus */
     .badge-obtenu {
@@ -211,89 +286,44 @@ st.markdown("""
         border-color: var(--am-green) !important;
     }
 
-    /* Messages connexion : palette ASTON COHERENTE, plus de bleu/olive qui jurent.
-       On utilise des selecteurs forts pour ecraser les styles inline Streamlit */
-    div.stAlert, div[data-testid="stAlert"] {
-        background-color: rgba(8, 55, 50, 0.75) !important;
-        backdrop-filter: blur(14px) !important;
-        -webkit-backdrop-filter: blur(14px) !important;
-        border-radius: 16px !important;
-        border: 1px solid var(--am-border) !important;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.22) !important;
-        color: var(--am-text) !important;
-    }
-    div.stAlert p, div[data-testid="stAlert"] p,
-    div.stAlert span, div[data-testid="stAlert"] span,
-    div.stAlert label, div[data-testid="stAlert"] label {
-        color: var(--am-text) !important;
-    }
-
-    div.stInfo, div[data-testid="stAlert"][kind="info"] {
-        background: linear-gradient(135deg, rgba(0,102,95,0.5) 0%, rgba(0,70,65,0.6) 100%) !important;
-        border-left: 4px solid var(--am-green) !important;
-        border: 1px solid rgba(0,163,146,0.4) !important;
-    }
-    div.stInfo svg, div[data-testid="stAlert"][kind="info"] svg { fill: var(--am-green) !important; }
-
-    div.stSuccess, div[data-testid="stAlert"][kind="success"] {
-        background: linear-gradient(135deg, rgba(0,163,146,0.22) 0%, rgba(0,82,75,0.38) 100%) !important;
-        border-left: 4px solid var(--am-green) !important;
-        border: 1px solid rgba(0,163,146,0.45) !important;
-    }
-    div.stSuccess svg, div[data-testid="stAlert"][kind="success"] svg { fill: var(--am-green) !important; }
-
-    div.stWarning, div[data-testid="stAlert"][kind="warning"] {
-        background: linear-gradient(135deg, rgba(206,220,0,0.12) 0%, rgba(110,120,0,0.22) 100%) !important;
-        border-left: 4px solid var(--am-lime) !important;
-        border: 1px solid rgba(206,220,0,0.4) !important;
-    }
-    div.stWarning svg, div[data-testid="stAlert"][kind="warning"] svg { fill: var(--am-lime) !important; }
-
-    div.stError, div[data-testid="stAlert"][kind="error"] {
-        background: rgba(237,34,36,0.12) !important;
-        border-left: 4px solid #ED2224 !important;
-        border: 1px solid rgba(237,34,36,0.35) !important;
-    }
-    div.stError svg, div[data-testid="stAlert"][kind="error"] svg { fill: #ED2224 !important; }
+    /* (Les styles des alertes sont definis plus haut, avec le warning #00D084) */
 
     .stButton > button {
         font-weight: 600; padding: 0.7em 1.3em; color: var(--am-text) !important;
         transition: all 0.25s ease;
-        background: rgba(3, 30, 27, 0.85) !important;
-        border: 1px solid rgba(0,163,146,0.4) !important;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.35) !important;
+        background: rgba(3, 30, 27, 0.55) !important;
+        border: 1px solid rgba(0,163,146,0.25) !important;
+        box-shadow: none !important;
     }
     .stButton > button:hover {
-        background: var(--am-bg-card-hover) !important;
-        transform: translateY(-2px);
-        box-shadow: 0 8px 26px rgba(0,163,146,0.3) !important;
-        border-color: var(--am-green) !important;
+        background: rgba(12, 75, 68, 0.7) !important;
+        transform: translateY(-1px);
+        border-color: rgba(0,163,146,0.5) !important;
     }
     .stButton > button[kind="primary"] {
         background: linear-gradient(135deg, var(--am-green) 0%, var(--am-green-aston) 100%) !important;
         border: none !important; font-weight: 700;
-        box-shadow: 0 4px 18px rgba(0,163,146,0.35) !important;
+        box-shadow: none !important;
     }
     .stButton > button[kind="primary"]:hover {
-        box-shadow: 0 8px 28px rgba(0,163,146,0.5) !important;
+        transform: translateY(-1px);
     }
 
     div[data-testid="stDownloadButton"] > button {
-        background: rgba(3, 30, 27, 0.85) !important;
+        background: rgba(3, 30, 27, 0.55) !important;
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
         border-radius: 16px !important;
-        border: 1px solid rgba(0,163,146,0.4) !important;
+        border: 1px solid rgba(0,163,146,0.25) !important;
         color: var(--am-text) !important;
         font-weight: 600;
         width: 100%;
         padding: 0.7em 1.3em;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.35) !important;
+        box-shadow: none !important;
     }
     div[data-testid="stDownloadButton"] > button:hover {
-        background: var(--am-bg-card-hover) !important;
-        border-color: var(--am-green) !important;
-        box-shadow: 0 8px 26px rgba(0,163,146,0.3) !important;
+        background: rgba(12, 75, 68, 0.7) !important;
+        border-color: rgba(0,163,146,0.5) !important;
     }
 
     section[data-testid="stSidebar"] {
@@ -320,7 +350,7 @@ st.markdown("""
         border: 1px solid rgba(0,163,146,0.4);
     }
 
-    .section-menu-title { font-size:0.75em; font-weight:800; color: var(--am-lime); text-transform:uppercase; letter-spacing:1.5px; margin:20px 0 12px 0; }
+    .section-menu-title { font-size:0.75em; font-weight:800; color: var(--am-green); text-transform:uppercase; letter-spacing:1.5px; margin:20px 0 12px 0; }
     input[type="checkbox"]:checked { accent-color: var(--am-green); }
     hr { border-color: var(--am-border) !important; }
     p, li, label { color: var(--am-text) !important; }
@@ -355,7 +385,7 @@ st.markdown("""
     .progress-bar-fill { height:100%; border-radius:8px; transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
     .progress-low { background: linear-gradient(90deg, var(--am-green-aston) 0%, var(--am-green) 100%); }
     .progress-mid { background: linear-gradient(90deg, var(--am-green) 0%, var(--am-lime) 100%); }
-    .progress-high { background: linear-gradient(90deg, var(--am-lime) 0%, #E8F064 100%); }
+    .progress-high { background: linear-gradient(90deg, var(--am-lime) 0%, #9CF5D3 100%); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -795,13 +825,13 @@ def naviguer():
 # ==================================================
 
 def entete():
-    # En-tete COMPACT : logo + titre + connexion sur une seule ligne
-    cl, ct, ci, cd = st.columns([0.05, 0.40, 0.42, 0.13])
+    # En-tete compact mais lisible : logo + titre + connexion + deconnexion sur une seule ligne
+    cl, ct, ci, cd = st.columns([0.06, 0.32, 0.47, 0.15])
     with cl:
-        try: st.image("trakt-logo.svg", width=36)
+        try: st.image("trakt-logo.svg", width=42)
         except: pass
     with ct:
-        st.markdown("<h3 style='margin:0; padding:4px 0 0 0; color:#F0FAF8; font-weight:800; font-size:1.3em;'>Trakt Smart Lists</h3>", unsafe_allow_html=True)
+        st.markdown("<h2 style='margin:0; padding:2px 0 0 0; color:#F0FAF8; font-weight:800; font-size:1.5em; letter-spacing:-0.5px;'>Trakt Smart Lists</h2>", unsafe_allow_html=True)
     if "access_token" not in st.session_state:
         st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
         return None
@@ -815,17 +845,16 @@ def entete():
     infos = st.session_state["infos"]
     pseudo, utz = infos["pseudo"], infos["tz"]
     with ci:
-        # Bandeau de connexion THEMATISE, plus de st.info bleu canard
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, rgba(0,102,95,0.5) 0%, rgba(0,70,65,0.6) 100%);
-                    border:1px solid rgba(0,163,146,0.4); border-radius:12px;
+        <div style="background: rgba(0,102,95,0.35);
+                    border:1px solid rgba(0,163,146,0.3); border-radius:12px;
                     padding:10px 16px; margin-top:2px; color:#F0FAF8;
-                    font-size:0.92em; backdrop-filter: blur(12px);">
+                    font-size:0.95em; backdrop-filter: blur(12px);">
             👤 Connecté en tant que <b>{pseudo}</b> • 🕒 <span style="color:#9DC5BF;">{infos['tz_name']}</span>
         </div>
         """, unsafe_allow_html=True)
     with cd:
-        if st.button("🚪", use_container_width=True, help="Déconnexion"):
+        if st.button("🚪 Déconnexion", use_container_width=True, help="Se déconnecter de Trakt"):
             oublier_connexion()
             st.rerun()
     st.markdown("<div style='height:2px;'></div>", unsafe_allow_html=True)
@@ -947,7 +976,7 @@ def page_lecture(utz):
     with cd:
         st.markdown(f"""
         <div class="now-playing-card">
-            <div style="font-size:0.85em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">▶️ EN LECTURE</div>
+            <div style="font-size:0.85em; color:#00D084; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">▶️ EN LECTURE</div>
             <div style="font-size:1.8em; font-weight:800; color:#F0FAF8; margin-bottom:8px;">{titre}</div>
             <div style="font-size:1em; color:#9DC5BF; margin-bottom:16px;">{tc} {f'({annee})' if annee else ''}</div>
             <div class="progress-bar-container" style="height:14px; margin-bottom:16px;">
@@ -1096,7 +1125,7 @@ def page_nettoyage(utz):
     st.subheader("Pourcentage de nettoyage par liste")
     df = pd.DataFrame(st.session_state["stats"])
     df["% nettoyable"] = (df["vus"]/df["total"].replace(0,1)*100).round(1)
-    st.bar_chart(df.set_index("nom")["% nettoyable"], color="#CEDC00")
+    st.bar_chart(df.set_index("nom")["% nettoyable"], color="#00D084")
 
 def page_doublons(utz):
     if bloc_lancement(): return
@@ -1527,7 +1556,7 @@ def page_stats(utz):
     # Heures par mois
     df["mois"] = df["date_dt"].dt.strftime("%m-%Y")
     h_mois = df.groupby("mois")["duree_h"].sum().round(1).sort_index()
-    opt_m = {"title":{"text":"Heures par mois","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":list(h_mois.index),"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"line","smooth":True,"lineStyle":{"color":"#CEDC00","width":3},"areaStyle":{"color":"rgba(206,220,0,0.1)"},"itemStyle":{"color":"#CEDC00"}}]}
+    opt_m = {"title":{"text":"Heures par mois","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":list(h_mois.index),"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"line","smooth":True,"lineStyle":{"color":"#00D084","width":3},"areaStyle":{"color":"rgba(206,220,0,0.1)"},"itemStyle":{"color":"#00D084"}}]}
     st_echarts(opt_m, height="350px")
 
     g1,g2 = st.columns(2)
@@ -1538,7 +1567,7 @@ def page_stats(utz):
             for g in lg:
                 if g and g != "Inconnu":
                     genres_n[g] = genres_n.get(g,0) + 1
-        opt_g = {"title":{"text":"Genres les plus regardés (nombre de contenus)","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"name":k,"value":v} for k,v in sorted(genres_n.items(), key=lambda x:-x[1])[:8]],"itemStyle":{"borderRadius":8,"borderColor":"#042E2B","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#CEDC00","#00C7B3","#A3B300","#00524B","#869400","#125A54","#E8F064"]}
+        opt_g = {"title":{"text":"Genres les plus regardés (nombre de contenus)","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"name":k,"value":v} for k,v in sorted(genres_n.items(), key=lambda x:-x[1])[:8]],"itemStyle":{"borderRadius":8,"borderColor":"#042E2B","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#00D084","#00C7B3","#00A392","#00524B","#008477","#125A54","#9CF5D3"]}
         st_echarts(opt_g, height="400px")
     with g2:
         df["h"] = df["date_dt"].dt.hour
@@ -1551,7 +1580,7 @@ def page_stats(utz):
         jours = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
         df["jsem"] = df["date_dt"].dt.weekday
         hj = df.groupby("jsem")["duree_h"].sum().reindex(range(7), fill_value=0).round(1)
-        opt_j = {"title":{"text":"Par jour de la semaine","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","xAxis":{"type":"category","data":jours,"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(hj.values),"type":"bar","itemStyle":{"color":"#CEDC00","borderRadius":[4,4,0,0]}}]}
+        opt_j = {"title":{"text":"Par jour de la semaine","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","xAxis":{"type":"category","data":jours,"axisLabel":{"color":"#9DC5BF"}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(hj.values),"type":"bar","itemStyle":{"color":"#00D084","borderRadius":[4,4,0,0]}}]}
         st_echarts(opt_j, height="400px")
     with g4:
         # Années de sortie
@@ -1565,7 +1594,7 @@ def page_stats(utz):
     g5,g6 = st.columns(2)
     with g5:
         rt = df.groupby("type")["duree_h"].sum().round(1)
-        opt_t = {"title":{"text":"Films vs Séries","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item","formatter":"{b} : {c}h ({d}%)"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"value":v,"name":k} for k,v in rt.items()],"itemStyle":{"borderRadius":8,"borderColor":"#042E2B","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#CEDC00"]}
+        opt_t = {"title":{"text":"Films vs Séries","left":"center","textStyle":{"color":"#F0FAF8"}},"tooltip":{"trigger":"item","formatter":"{b} : {c}h ({d}%)"},"backgroundColor":"transparent","legend":{"bottom":0,"textStyle":{"color":"#9DC5BF"}},"series":[{"type":"pie","radius":["40%","70%"],"data":[{"value":v,"name":k} for k,v in rt.items()],"itemStyle":{"borderRadius":8,"borderColor":"#042E2B","borderWidth":2},"label":{"color":"#F0FAF8"}}],"color":["#00A392","#00D084"]}
         st_echarts(opt_t, height="400px")
 
     with st.expander("📋 Détail des visionnages"):
@@ -1876,15 +1905,17 @@ def page_quoi_regarder(utz):
     tous_genres.discard("Inconnu"); tous_genres.discard("")
 
     st.markdown("#### 🔎 Filtres")
-    cf1, cf2, cf3, cf4 = st.columns(4)
+    cf1, cf2, cf3, cf4, cf5 = st.columns(5)
     with cf1:
         f_genre = st.selectbox("🎭 Genre", ["Tous"] + sorted(tous_genres))
     with cf2:
         f_note_min = st.select_slider("⭐ Note minimum", options=[0,5,6,7,7.5,8,8.5,9], value=0)
     with cf3:
-        f_temps_max = st.selectbox("⏱️ Temps max à investir", ["Aucune limite", "Moins d'1h30 (film)", "Moins de 2h", "Moins de 3h", "Soirée (< 10h)", "Week-end (< 24h)"])
+        f_temps_max = st.selectbox("⏱️ Temps max", ["Aucune limite", "Moins d'1h30 (film)", "Moins de 2h", "Moins de 3h", "Soirée (< 10h)", "Week-end (< 24h)"])
     with cf4:
-        f_tri = st.selectbox("🔀 Trier par", ["✨ Pour moi (recommandé)", "⭐ Meilleures notes", "⏱️ Plus rapide à regarder", "🔥 Populaires", "🆕 Ajouté récemment", "📅 Nouveautés (sorties)", "🎬 Films d'abord", "📺 Séries d'abord", "🤔 Ne correspond pas à mon profil"])
+        f_statut = st.selectbox("📺 Statut série", ["Tous les statuts", "Séries terminées", "Séries en cours", "Séries annulées", "Pilot/En prod"])
+    with cf5:
+        f_tri = st.selectbox("🔀 Trier par", ["✨ Pour moi (recommandé)", "⭐ Meilleures notes", "⏱️ Plus rapide", "🔥 Populaires", "🆕 Ajouté récemment", "📅 Nouveautés", "🎬 Films d'abord", "📺 Séries d'abord", "🙅 Pas pour moi"])
 
     # Appliquer les filtres
     def limite_temps_ok(r):
@@ -1895,9 +1926,18 @@ def page_quoi_regarder(utz):
         if f_temps_max == "Moins de 3h": return m <= 180
         if f_temps_max == "Soirée (< 10h)": return m/60 <= 10
         if f_temps_max == "Week-end (< 24h)": return m/60 <= 24
-        # si filtre film mais contenu serie => on exclut
         if f_temps_max in ["Moins d'1h30 (film)", "Moins de 2h"] and r["type"]=="Série":
             return False
+        return True
+
+    def statut_ok(r):
+        if f_statut == "Tous les statuts": return True
+        if r["type"] == "Film": return True  # les films ne sont pas concernes
+        s = r.get("status", "") or ""
+        if f_statut == "Séries terminées": return s == "ended"
+        if f_statut == "Séries en cours": return s in ("returning", "in production", "continuing")
+        if f_statut == "Séries annulées": return s in ("canceled", "ended")
+        if f_statut == "Pilot/En prod": return s in ("planned", "in production", "pilot")
         return True
 
     filtrés = []
@@ -1907,6 +1947,7 @@ def page_quoi_regarder(utz):
         if f_genre != "Tous" and f_genre not in r["genres_liste"]: continue
         if r["note"] is not None and r["note"] < f_note_min: continue
         if not limite_temps_ok(r): continue
+        if not statut_ok(r): continue
         filtrés.append(r)
 
     if not filtrés:
@@ -1953,16 +1994,16 @@ def page_quoi_regarder(utz):
 
     st.markdown("""
     <style>
-    .rec-card-rec { background: linear-gradient(135deg, rgba(0,163,146,0.20) 0%, rgba(0,82,75,0.35) 100%); border:1px solid rgba(0,163,146,0.4); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
-    .rec-card-mid { background: rgba(8,55,50,0.55); border:1px solid rgba(18,90,84,0.4); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
-    .rec-card-bad { background: rgba(80,35,20,0.35); border:1px solid rgba(180,110,40,0.35); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
+    .rec-card-rec { background: linear-gradient(135deg, rgba(0,163,146,0.18) 0%, rgba(0,82,75,0.30) 100%); border:1px solid rgba(0,163,146,0.35); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
+    .rec-card-mid { background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
+    .rec-card-bad { background: rgba(60,60,40,0.30); border:1px solid rgba(206,220,0,0.2); border-radius:16px; padding:16px; margin-bottom:14px; backdrop-filter: blur(12px); }
     .rec-titre { font-size:1.15em; font-weight:700; color:#F0FAF8; margin-bottom:4px; }
     .rec-meta { font-size:0.88em; color:#9DC5BF; margin-bottom:8px; }
-    .rec-score { font-size:1.6em; font-weight:800; color:#CEDC00; line-height:1; }
-    .rec-tag-ok { display:inline-block; padding:4px 11px; margin:3px 4px 3px 0; border-radius:12px; background:rgba(0,163,146,0.25); color:#7EE0D3; font-size:0.82em; font-weight:600; }
-    .rec-tag-warn { display:inline-block; padding:4px 11px; margin:3px 4px 3px 0; border-radius:12px; background:rgba(210,130,40,0.22); color:#F2B670; font-size:0.82em; font-weight:600; }
-    .rec-score-bar { height:8px; background:rgba(0,0,0,0.3); border-radius:4px; margin-top:8px; overflow:hidden; }
-    .rec-score-fill { height:100%; border-radius:4px; background: linear-gradient(90deg, #00524B, #00A392, #CEDC00); }
+    .rec-score { font-size:1.6em; font-weight:800; color:#00D084; line-height:1; }
+    .rec-tag-ok { display:inline-block; padding:4px 11px; margin:3px 4px 3px 0; border-radius:12px; background:rgba(0,208,132,0.18); color:#7CE0B8; font-size:0.82em; font-weight:600; }
+    .rec-tag-warn { display:inline-block; padding:4px 11px; margin:3px 4px 3px 0; border-radius:12px; background:rgba(206,220,0,0.12); color:#00D084; font-size:0.82em; font-weight:600; }
+    .rec-score-bar { height:8px; background:rgba(0,0,0,0.25); border-radius:4px; margin-top:8px; overflow:hidden; }
+    .rec-score-fill { height:100%; border-radius:4px; background: linear-gradient(90deg, #00524B, #00A392, #00D084); }
     </style>
     """, unsafe_allow_html=True)
 
@@ -1979,16 +2020,30 @@ def page_quoi_regarder(utz):
                 else:
                     st.markdown("🎬" if r["type"]=="Film" else "📺")
             with cc:
+                import html as html_mod
                 an_part = f"({r['annee']})" if r.get('annee') else ""
                 aj_part = f"· 📥 Ajouté il y a {r['ajout']}j" if r['ajout'] is not None else ""
                 note_part = f"{r['note']}" if r['note'] else "?"
                 ep_part = f"· 📺 {r['nb_episodes']} ép." if r["type"]=="Série" and r["nb_episodes"]>0 else ""
+                # Construction sûre des tags (échappement HTML pour éviter les fuites)
+                tags_ok = "".join(
+                    f'<span class="rec-tag-ok">✅ {html_mod.escape(str(x))}</span>'
+                    for x in r["raisons"]
+                )
+                tags_warn = "".join(
+                    f'<span class="rec-tag-warn">⚠️ {html_mod.escape(str(x))}</span>'
+                    for x in r["averti"]
+                )
+                titre_esc = html_mod.escape(str(r["titre"]))
+                type_esc = html_mod.escape(str(r["type"]))
+                genres_esc = html_mod.escape(str(r["genres"]))
+                temps_esc = html_mod.escape(str(r["temps"]))
                 st.markdown(f"""
                 <div class="rec-card-{cls}">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
                         <div style="flex:1;">
-                            <div class="rec-titre">{r['type']} — {r['titre']} {an_part}</div>
-                            <div class="rec-meta">⭐ {note_part}<b>/10</b> · ⏱️ {r['temps']} · 🎭 {r['genres']} {ep_part} {aj_part}</div>
+                            <div class="rec-titre">{type_esc} — {titre_esc} {an_part}</div>
+                            <div class="rec-meta">⭐ {note_part}<b>/10</b> · ⏱️ {temps_esc} · 🎭 {genres_esc} {ep_part} {aj_part}</div>
                         </div>
                         <div style="text-align:center; min-width:60px;">
                             <div class="rec-score">{r['score']}</div>
@@ -1997,8 +2052,8 @@ def page_quoi_regarder(utz):
                     </div>
                     <div class="rec-score-bar"><div class="rec-score-fill" style="width:{r['score']}%"></div></div>
                     <div style="margin-top:10px;">
-                        {''.join(f'<span class="rec-tag-ok">✅ {x}</span>' for x in r['raisons'])}
-                        {''.join(f'<span class="rec-tag-warn">⚠️ {x}</span>' for x in r['averti'])}
+                        {tags_ok}
+                        {tags_warn}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
