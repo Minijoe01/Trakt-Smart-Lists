@@ -335,6 +335,24 @@ st.markdown("""
         margin: 0 !important;
     }
 
+    /* ANTI-OMBRE : forcer l'absence d'ombre sur TOUS les boutons, inputs, selects */
+    div.stButton > button,
+    div.stButton > button:hover,
+    div.stButton > button:active,
+    div.stButton > button:focus,
+    div[data-testid="stDownloadButton"] > button,
+    div[data-testid="stDownloadButton"] > button:hover,
+    div[data-testid="stDownloadButton"] > button:active,
+    div[data-baseweb="button"],
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div,
+    button {
+        box-shadow: none !important;
+        -webkit-box-shadow: none !important;
+        -moz-box-shadow: none !important;
+        text-shadow: none !important;
+    }
+
     section[data-testid="stSidebar"] {
         background: rgba(2,20,18,0.96) !important;
         backdrop-filter: blur(22px) !important;
@@ -1044,30 +1062,42 @@ def page_dashboard(utz):
             if len(pb) > 0:
                 pct = round(len(pb)/max(len(pb)+h["nb_vf"]+h["nb_ep"],1)*100,1)
                 st.metric("Nombre", len(pb), delta=f"{pct}%")
-                st.warning(f"{len(pb)} fantôme(s) à nettoyer")
+                st.markdown(f"""<div style="background:rgba(0,208,132,0.18); border:1px solid rgba(0,208,132,0.4); border-radius:10px; padding:8px 12px; color:#7CE0B8; font-weight:600; font-size:0.95em; margin-top:8px;">
+                    {len(pb)} fantôme(s) à nettoyer
+                </div>""", unsafe_allow_html=True)
             else:
                 st.metric("Nombre",0)
-                st.success("✅ Rien à nettoyer")
+                st.markdown("""<div style="background:rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:10px; padding:8px 12px; color:#7EE0D3; font-weight:600; font-size:0.95em; margin-top:8px;">
+                    ✅ Rien à nettoyer
+                </div>""", unsafe_allow_html=True)
     with c6:
         with st.container(border=True):
             st.markdown("#### 🔁 Doublons")
             if len(doub) > 0:
                 pct = round(len(doub)/max(total_items,1)*100,1)
                 st.metric("Nombre", len(doub), delta=f"{pct}%")
-                st.warning(f"{len(doub)} doublon(s)")
+                st.markdown(f"""<div style="background:rgba(0,208,132,0.18); border:1px solid rgba(0,208,132,0.4); border-radius:10px; padding:8px 12px; color:#7CE0B8; font-weight:600; font-size:0.95em; margin-top:8px;">
+                    {len(doub)} doublon(s)
+                </div>""", unsafe_allow_html=True)
             else:
                 st.metric("Nombre",0)
-                st.success("✅ Aucun doublon")
+                st.markdown("""<div style="background:rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:10px; padding:8px 12px; color:#7EE0D3; font-weight:600; font-size:0.95em; margin-top:8px;">
+                    ✅ Aucun doublon
+                </div>""", unsafe_allow_html=True)
     with c7:
         with st.container(border=True):
             st.markdown("#### 🧹 Déjà vus")
             if len(res) > 0:
                 pct = round(len(res)/max(total_items,1)*100,1)
                 st.metric("Nombre", len(res), delta=f"{pct}%")
-                st.warning(f"{len(res)} contenu(s) vus dans les listes")
+                st.markdown(f"""<div style="background:rgba(0,208,132,0.18); border:1px solid rgba(0,208,132,0.4); border-radius:10px; padding:8px 12px; color:#7CE0B8; font-weight:600; font-size:0.95em; margin-top:8px;">
+                    {len(res)} contenu(s) vus dans les listes
+                </div>""", unsafe_allow_html=True)
             else:
                 st.metric("Nombre",0)
-                st.success("✅ Listes à jour")
+                st.markdown("""<div style="background:rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:10px; padding:8px 12px; color:#7EE0D3; font-weight:600; font-size:0.95em; margin-top:8px;">
+                    ✅ Listes à jour
+                </div>""", unsafe_allow_html=True)
     with c8:
         with st.container(border=True):
             st.markdown("#### 🚀 Nettoyage auto")
@@ -1200,11 +1230,18 @@ def page_fantomes(utz):
         ✅ Aucune progression en cours.
         </div>""", unsafe_allow_html=True)
     else:
-        if "tout_pb" not in st.session_state:
-            st.session_state["tout_pb"] = False
-        col_tout, _ = st.columns([1,3])
-        with col_tout:
-            tout = st.checkbox("Tout sélectionner", key="tout_pb")
+        # Boutons de selection rapide (plus fiables qu'une case a cocher)
+        col_sel, col_vider, _ = st.columns([1,1,3])
+        with col_sel:
+            if st.button("✅ Tout sélectionner", use_container_width=True):
+                for it in pb:
+                    st.session_state[f"c_{it['pid']}"] = True
+                st.rerun()
+        with col_vider:
+            if st.button("❌ Tout décocher", use_container_width=True):
+                for it in pb:
+                    st.session_state[f"c_{it['pid']}"] = False
+                st.rerun()
         sels = {}
         for it in pb:
             p = it["prog"]
@@ -1973,15 +2010,27 @@ def page_quoi_regarder(utz):
 
     def statut_ok(r):
         if f_statut == "Tous les statuts": return True
-        if r["type"] == "Film": return True  # les films ne sont pas concernes par ce filtre
-        s = r.get("status", "") or ""
-        nbep = r.get("nb_episodes", 0) or 0
-        if f_statut == "Séries terminées": return s == "ended"
-        # Séries en cours : au moins une saison sortie + nouvelles saisons annoncées/prevues
-        if f_statut == "Séries en cours":
-            return s in ("returning", "continuing") and nbep > 0
-        if f_statut == "Séries annulées": return s == "canceled"
-        if f_statut == "Pas encore sorties": return s in ("planned", "in production", "pilot") or nbep == 0
+        # Pour les options specifiques aux series, on n'affiche QUE des series (pas de films)
+        if f_statut in ("Séries terminées", "Séries en cours", "Séries annulées"):
+            if r["type"] != "Série": return False
+            s = r.get("status", "") or ""
+            nbep = r.get("nb_episodes", 0) or 0
+            if f_statut == "Séries terminées": return s == "ended"
+            # Séries en cours : au moins un épisode sorti, NI terminée NI annulée
+            if f_statut == "Séries en cours":
+                return nbep > 0 and s not in ("ended", "canceled")
+            if f_statut == "Séries annulées": return s == "canceled"
+        if f_statut == "Pas encore sorties":
+            # Films pas encore sortis OU séries en prod/planned
+            s = r.get("status", "") or ""
+            nbep = r.get("nb_episodes", 0) or 0
+            if r["type"] == "Film":
+                # Film pas encore sorti si son année > année en cours
+                try:
+                    return (r.get("annee") or 0) > datetime.now(utz).year
+                except: return False
+            else:
+                return s in ("planned", "in production", "pilot") or nbep == 0
         return True
 
     filtrés = []
