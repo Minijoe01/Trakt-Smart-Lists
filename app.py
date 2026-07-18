@@ -14,7 +14,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.formatting.rule import ColorScaleRule
 from streamlit_echarts import st_echarts
 
-st.set_page_config(page_title="Trakt Smart Lists", page_icon="🏎️", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Trakt Smart Lists", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
 
 # ==================================================
 # UTILITAIRES
@@ -62,9 +62,9 @@ st.markdown("""
         --am-text-muted: #9DC5BF;
     }
 
-    /* DEGRADE FOND avec VERT ASTON OFFICIEL #00665F */
+    /* DEGRADE FOND : VERT ASTON en haut, vert tres sombre presque noir en bas */
     .stApp {
-        background: linear-gradient(180deg, #042E2B 0%, #00665F 50%, #042E2B 100%) !important;
+        background: linear-gradient(180deg, #00665F 0%, #031B1A 100%) !important;
         background-attachment: fixed !important;
     }
 
@@ -609,7 +609,7 @@ def ajuster(ws):
                 pass
         ws.column_dimensions[lettre].width = min(l+4, 40)
 
-def forme(ws, coul="#00665F"):
+def forme(ws, coul="00665F"):
     ws.freeze_panes = "A2"
     if ws.max_row > 1:
         ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
