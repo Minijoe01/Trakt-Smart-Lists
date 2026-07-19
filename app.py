@@ -1032,19 +1032,19 @@ def rendre_carte_lecture(info, utz, compacte=False):
     """Rend une carte 'en cours de lecture' avec le même style que les fantômes :
     liseré lime à gauche, affiche + infos + barre de progression + stats + lien Trakt.
     Si compacte=True (dashboard), mise en page plus dense (tailles réduites).
+    IMPORTANT : on garde le HTML sur peu de lignes et sans indentation profonde,
+    sinon Streamlit/Markdown traite les lignes indentées comme du BLOC DE CODE.
     """
     if not info:
         return ""
     tmdb = info.get("tmdb")
     img_url = image_tmdb(tmdb, info["type_c"]) if tmdb else None
-    lien_html = ""
     if info.get("lien_trakt"):
-        lien_html = (f'<a href="{info["lien_trakt"]}" target="_blank" '
-                     f'style="color:#CEDC00; text-decoration:none; font-size:0.85em; margin-left:8px;">'
-                     f'🔗 Voir sur Trakt</a>')
+        lien_html = '<a href="{}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.85em; margin-left:8px;">🔗 Voir sur Trakt</a>'.format(info["lien_trakt"])
+    else:
+        lien_html = ""
     ic = "📺" if info["is_episode"] else "🎬"
-    an_part = f' ({info["annee"]})' if info.get("annee") else ""
-
+    an_part = ' ({})'.format(info["annee"]) if info.get("annee") else ""
     if compacte:
         pad = "14px 18px"
         titre_size = "1.15em"
@@ -1065,57 +1065,53 @@ def rendre_carte_lecture(info, utz, compacte=False):
         img_w = "90px"
         img_h = "130px"
         ic_size = "2.4em"
-
     # Affiche
     if img_url:
-        img_html = (f'<img src="{img_url}" style="border-radius:12px; width:{img_w}; '
-                    f'min-width:{img_w}; height:auto; object-fit:cover; display:block;" '
-                    f'loading="lazy" />')
+        img_html = '<img src="{}" style="border-radius:12px; width:{}; min-width:{}; height:auto; object-fit:cover; display:block;" loading="lazy" />'.format(img_url, img_w, img_w)
     else:
-        img_html = (f'<div style="width:{img_w}; min-width:{img_w}; height:{img_h}; border-radius:12px; '
-                    f'background:rgba(5,38,34,0.6); display:flex; align-items:center; '
-                    f'justify-content:center; font-size:{ic_size};">{ic}</div>')
-
-    # Grille UNIFORME de 6 stats (3col × 2lig), plus de HTML conditionnel
+        img_html = '<div style="width:{}; min-width:{}; height:{}; border-radius:12px; background:rgba(5,38,34,0.6); display:flex; align-items:center; justify-content:center; font-size:{};">{}</div>'.format(img_w, img_w, img_h, ic_size, ic)
+    # Construire les 6 blocs stats SANS saut de ligne ni indentation profonde
     stats = [
-        ("Début",              info["debut_aff"]),
-        ("Fin estimée",        info["fin_aff"]),
-        ("⏱️ Déjà regardé",    info["ecoule_str"]),
-        ("Durée",              info["duree_aff"]),
-        ("⏳ Restant",          info["restant_str"]),
-        ("Progression",        f"{info['pct']}%"),
+        ("Début", info["debut_aff"]),
+        ("Fin estimée", info["fin_aff"]),
+        ("⏱️ Déjà regardé", info["ecoule_str"]),
+        ("Durée", info["duree_aff"]),
+        ("⏳ Restant", info["restant_str"]),
+        ("Progression", "{}%".format(info["pct"])),
     ]
-    stats_html_parts = []
+    stats_html = ""
     for lbl, val in stats:
-        stats_html_parts.append(f"""
-            <div>
-              <div style="font-size:{label_size}; color:#9DC5BF; text-transform:uppercase; letter-spacing:0.5px;">{lbl}</div>
-              <div style="font-size:{val_size}; font-weight:600; color:#F0FAF8;">{val}</div>
-            </div>""")
-    stats_html = "\n".join(stats_html_parts)
-
-    html = f"""
-    <div class="ghost-card carte-important" style="padding:{pad};">
-      <div style="display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap;">
-        <div style="flex-shrink:0;">{img_html}</div>
-        <div style="flex:1; min-width:220px;">
-          <div style="font-size:0.8em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">▶️ EN LECTURE</div>
-          <div class="ghost-title" style="font-size:{titre_size}; margin-bottom:4px; line-height:1.25;">
-            {ic} {info['titre']}{an_part} {lien_html}
-          </div>
-          <div class="ghost-meta" style="font-size:{meta_size}; margin-bottom:14px;">
-            {info['type_lib']} • {info['duree_aff']} • {info['pct']}% visionné
-          </div>
-          <div class="progress-bar-container" style="height:{bar_h}; margin-bottom:14px;">
-            <div class="progress-bar-fill {info['cls']}" style="width:{info['pct']}%;"></div>
-          </div>
-          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;">
-            {stats_html}
-          </div>
-        </div>
-      </div>
-    </div>
-    """
+        stats_html += (
+            '<div>'
+            '<div style="font-size:{}; color:#9DC5BF; text-transform:uppercase; letter-spacing:0.5px;">{}</div>'
+            '<div style="font-size:{}; font-weight:600; color:#F0FAF8;">{}</div>'
+            '</div>'
+        ).format(label_size, lbl, val_size, val)
+    # Assemblage final : une seule div par ligne, pas d'indentation profonde
+    html = (
+        '<div class="ghost-card carte-important" style="padding:{};">'
+        '<div style="display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap;">'
+        '<div style="flex-shrink:0;">{}</div>'
+        '<div style="flex:1; min-width:220px;">'
+        '<div style="font-size:0.8em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">▶️ EN LECTURE</div>'
+        '<div class="ghost-title" style="font-size:{}; margin-bottom:4px; line-height:1.25;">{} {}{} {}</div>'
+        '<div class="ghost-meta" style="font-size:{}; margin-bottom:14px;">{} • {} • {}% visionné</div>'
+        '<div class="progress-bar-container" style="height:{}; margin-bottom:14px;">'
+        '<div class="progress-bar-fill {}" style="width:{}%;"></div>'
+        '</div>'
+        '<div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;">'
+        '{}'
+        '</div>'
+        '</div>'
+        '</div>'
+        '</div>'
+    ).format(
+        pad, img_html,
+        titre_size, ic, info["titre"], an_part, lien_html,
+        meta_size, info["type_lib"], info["duree_aff"], info["pct"],
+        bar_h, info["cls"], info["pct"],
+        stats_html
+    )
     return html
 
 
@@ -1441,7 +1437,8 @@ def page_lecture(utz):
     ne necessite PAS d'analyse complete pour fonctionner.
     Affiche progression, temps ecoule, temps restant, heure de fin, lien Trakt.
     Le calcul utilise progress% (live, inclut l'avant-reprise) + runtime pour la fiabilite.
-    Si la duree manque (contenu non sorti), fallback sur les fantomes puis expires_at.
+    Si la duree manque (contenu non sorti), on charge aussi les fantômes
+    (2e appel API, uniquement si necessaire pour le fallback progress).
     """
     st.subheader("▶️ En cours de lecture")
     at = st.session_state["access_token"]
@@ -1459,7 +1456,17 @@ def page_lecture(utz):
         </div>""", unsafe_allow_html=True)
         return
 
-    info = calculer_lecture(np, utz)
+    # Charger les fantômes SEULEMENT si on n'en a pas déjà en session,
+    # pour permettre le fallback progress si le player n'a pas envoyé son heartbeat
+    pb_data = st.session_state.get("pb")
+    if pb_data is None:
+        try:
+            pb_data = recuperer_playback(at)
+            st.session_state["pb"] = pb_data
+        except Exception:
+            pb_data = []
+
+    info = calculer_lecture(np, utz, pb_data=pb_data)
     if not info:
         st.markdown("""
         <div style="background: rgba(8,55,50,0.45); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:22px; color:#F0FAF8; text-align:center;">
