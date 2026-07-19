@@ -429,13 +429,15 @@ st.markdown("""
     }
     #MainMenu {visibility: visible;} /* on garde le menu hamburger accessible */
 
-    /* Liseré lime (jaune fluo Aston) sur les cartes IMPORTANTES,
-       comme sur les fantomes : recommandations > 70, sorties Aujourd'hui/Cette semaine */
+    /* Liseré lime (jaune fluo Aston) sur les cartes IMPORTANTES
+       (lecture en cours, fantômes) */
     .carte-important {
         border-left: 4px solid var(--am-lime) !important;
     }
-    .carte-reco {
-        border-left: 4px solid var(--am-green) !important;
+    /* Quand on met ce marqueur dans un markdown juste avant un container,
+       le container a le liseré lime */
+    .lime-marker + div[data-testid="stContainer"] {
+        border-left: 4px solid var(--am-lime) !important;
     }
 
 </style>
@@ -1191,30 +1193,57 @@ def page_lecture(utz):
         temps_ecoule_str = ""
         temps_restant_str = ""
 
+        expires_at = np.get("expires_at")
         if action_at:
             try:
                 debut = datetime.fromisoformat(action_at.replace("Z","+00:00")).astimezone(utz)
             except Exception:
                 debut = None
 
-        if debut and duree and duree > 0:
-            maintenant_local = datetime.now(utz)
-            ecoule_depuis_reprise_min = max(0, (maintenant_local - debut).total_seconds()) / 60
-            ecoule_total_min = (prog_dep_api/100.0)*duree + ecoule_depuis_reprise_min
-            prog = min(100.0, (ecoule_total_min / duree) * 100)
-            restant_min = max(0, duree - ecoule_total_min)
-            fin = maintenant_local + timedelta(minutes=restant_min)
-            em = int(round(ecoule_total_min))
-            temps_ecoule_str = f"{em//60}h{em%60:02d}" if em >= 60 else f"{em}min"
-            rm = int(round(restant_min))
-            temps_restant_str = f"{rm//60}h{rm%60:02d}" if rm >= 60 else f"{rm}min"
-        elif duree > 0:
-            prog = prog_dep_api
-            em = int(round((prog_dep_api/100)*duree))
-            temps_ecoule_str = f"{em//60}h{em%60:02d}" if em >= 60 else f"{em}min"
-            rm = int(round(duree - em))
-            temps_restant_str = f"{rm//60}h{rm%60:02d}" if rm >= 60 else f"{rm}min"
-        else:
+        # METHODE FIABLE (comme TPPM) : Trakt donne toujours expires_at qui est l'heure
+        # de FIN exacte du contenu, MEME si runtime=0 (ex: Toy Story 5 pas sorti).
+        # On n'a donc PAS besoin des fantomes pour avoir la duree.
+        try:
+            if expires_at:
+                fin_expire = datetime.fromisoformat(expires_at.replace("Z","+00:00")).astimezone(utz)
+                if debut and fin_expire:
+                    # duree exacte du contenu = fin - debut
+                    duree_sec = max(1, (fin_expire - debut).total_seconds())
+                    if duree <= 0:
+                        duree = max(1, round(duree_sec/60))
+                    maintenant_local = datetime.now(utz)
+                    ecoule_reprise_sec = max(0, (maintenant_local - debut).total_seconds())
+                    ecoule_total_sec = (prog_dep_api/100.0)*duree_sec + ecoule_reprise_sec
+                    prog = min(100.0, (ecoule_total_sec/duree_sec)*100)
+                    restant_sec = max(0, duree_sec - ecoule_total_sec)
+                    fin = maintenant_local + timedelta(seconds=restant_sec)
+                    em = int(round(ecoule_total_sec/60))
+                    temps_ecoule_str = f"{em//60}h{em%60:02d}" if em >= 60 else f"{em}min"
+                    rm = int(round(restant_sec/60))
+                    temps_restant_str = f"{rm//60}h{rm%60:02d}" if rm >= 60 else f"{rm}min"
+            if not fin and debut and duree and duree > 0:
+                # Fallback si pas d'expires_at
+                maintenant_local = datetime.now(utz)
+                ecoule_reprise_min = max(0,(maintenant_local-debut).total_seconds())/60
+                ecoule_total_min = (prog_dep_api/100)*duree + ecoule_reprise_min
+                prog = min(100.0, ecoule_total_min/duree*100)
+                restant_min = max(0, duree - ecoule_total_min)
+                fin = maintenant_local + timedelta(minutes=restant_min)
+                em = int(round(ecoule_total_min))
+                temps_ecoule_str = f"{em//60}h{em%60:02d}" if em>=60 else f"{em}min"
+                rm = int(round(restant_min))
+                temps_restant_str = f"{rm//60}h{rm%60:02d}" if rm>=60 else f"{rm}min"
+            elif not fin and duree > 0:
+                prog = prog_dep_api
+                em = int(round((prog_dep_api/100)*duree))
+                temps_ecoule_str = f"{em//60}h{em%60:02d}" if em>=60 else f"{em}min"
+                rm = int(round(duree - em))
+                temps_restant_str = f"{rm//60}h{rm%60:02d}" if rm>=60 else f"{rm}min"
+            elif not fin:
+                prog = prog_dep_api
+                temps_ecoule_str = "-"
+                temps_restant_str = "-"
+        except Exception:
             prog = prog_dep_api
             temps_ecoule_str = "-"
             temps_restant_str = "-"
@@ -1276,6 +1305,47 @@ def page_lecture(utz):
             st.caption("Rafraîchis la page pour mettre à jour les temps.")
     except Exception as e:
         st.error(f"Erreur d'affichage de la lecture : {e}")
+
+
+def page_connexion():
+    if "dc" not in st.session_state:
+        st.write("Connecte ton compte Trakt pour commencer.")
+        if st.button("🚀 Se connecter à Trakt", type="primary"):
+            infos = demarrer_connexion()
+            if infos:
+                st.session_state["dc"] = infos["device_code"]
+                st.session_state["uc"] = infos["user_code"]
+                st.session_state["vu"] = infos["verification_url"]
+                st.session_state["exp"] = infos["expires_in"]
+                st.session_state["iv"] = infos["interval"]
+                st.rerun()
+    else:
+        url = f"{st.session_state['vu']}/{st.session_state['uc']}"
+        cg, cd = st.columns(2)
+        with cg:
+            st.markdown(f'<a href="{url}" target="_blank" style="display:inline-block; background:linear-gradient(135deg,#00A392,#00524B); color:white; padding:0.9em 1.7em; border-radius:12px; text-decoration:none; font-weight:700;">Autoriser l\'accès</a>', unsafe_allow_html=True)
+            st.caption("Sur n'importe quel appareil.")
+            st.markdown(f"""
+            <div style="background: rgba(0,102,95,0.35); border:1px solid rgba(0,163,146,0.3); border-radius:14px; padding:18px; color:#F0FAF8; font-size:1.05em;">
+            Code : <b style="color:#CEDC00; font-size:1.3em; letter-spacing:3px;">{st.session_state['uc']}</b>
+            </div>""", unsafe_allow_html=True)
+        with cd:
+            st.image(qrcode_img(url), width=160)
+            st.caption("Ou scanne le QR code.")
+        st.caption("La page se met à jour automatiquement.")
+        with st.spinner("Attente de l'autorisation..."):
+            t=0
+            while t < st.session_state["exp"]:
+                time.sleep(st.session_state["iv"])
+                t += st.session_state["iv"]
+                tok = verifier_connexion(st.session_state["dc"])
+                if tok:
+                    sauvegarder_connexion(tok)
+                    del st.session_state["dc"]
+                    st.rerun()
+        st.error("Délai expiré.")
+        if st.button("Réessayer"): st.rerun()
+
 
 def page_dashboard(utz):
     if bloc_lancement(): return
@@ -1351,6 +1421,7 @@ def page_dashboard(utz):
             img = image_tmdb(tmdb, "tv" if is_episode else "movie") if tmdb else None
             lien_html = f'<a href="{lien}" target="_blank" style="color:#CEDC00; text-decoration:none; margin-left:8px;">🔗 Trakt</a>' if lien else ""
             cls = "progress-low" if prog<30 else "progress-mid" if prog<80 else "progress-high"
+            st.markdown('<div class="lime-marker"></div>', unsafe_allow_html=True)
             with st.container(border=True):
                 ci, cd = st.columns([0.10, 0.90])
                 with ci:
@@ -1371,8 +1442,8 @@ def page_dashboard(utz):
                         <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; font-size:0.9em;">
                             <div><span style="color:#9DC5BF; text-transform:uppercase; font-size:0.75em;">Début</span><br><b style="color:#F0FAF8;">{debut.strftime('%H:%M') if debut else '-'}</b></div>
                             <div><span style="color:#9DC5BF; text-transform:uppercase; font-size:0.75em;">Fin</span><br><b style="color:#F0FAF8;">{fin.strftime('%H:%M') if fin else '-'}</b></div>
-                            <div><span style="color:#9DC5BF; text-transform:uppercase; font-size:0.75em;">Déjà vu</span><br><b style="color:#F0FAF8;">{ecoule_str or '-'}</b></div>
-                            <div><span style="color:#9DC5BF; text-transform:uppercase; font-size:0.75em;">Restant</span><br><b style="color:#F0FAF8;">{restant_str or '-'}</b></div>
+                            <div><span style="color:#9DC5BF; text-transform:uppercase; font-size:0.75em;">Déjà vu</span><br><b style="color:#F0FAF8;">{temps_ecoule_str or '-'}</b></div>
+                            <div><span style="color:#9DC5BF; text-transform:uppercase; font-size:0.75em;">Restant</span><br><b style="color:#F0FAF8;">{temps_restant_str or '-'}</b></div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
