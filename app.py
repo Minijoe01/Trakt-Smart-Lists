@@ -419,6 +419,25 @@ st.markdown("""
     .progress-low { background: linear-gradient(90deg, var(--am-green-aston) 0%, var(--am-green) 100%); }
     .progress-mid { background: linear-gradient(90deg, var(--am-green) 0%, var(--am-lime) 100%); }
     .progress-high { background: linear-gradient(90deg, var(--am-lime) 0%, #E8F064 100%); }
+    /* Barre Streamlit du haut : rendue transparante avec effet glass, meme theme que les cartes */
+    header[data-testid="stHeader"] {
+        background: rgba(2, 20, 18, 0.7) !important;
+        backdrop-filter: blur(16px) !important;
+        -webkit-backdrop-filter: blur(16px) !important;
+        border-bottom: 1px solid var(--am-border) !important;
+        box-shadow: none !important;
+    }
+    #MainMenu {visibility: visible;} /* on garde le menu hamburger accessible */
+
+    /* Liseré lime (jaune fluo Aston) sur les cartes IMPORTANTES,
+       comme sur les fantomes : recommandations > 70, sorties Aujourd'hui/Cette semaine */
+    .carte-important {
+        border-left: 4px solid var(--am-lime) !important;
+    }
+    .carte-reco {
+        border-left: 4px solid var(--am-green) !important;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1095,11 +1114,12 @@ def bloc_lancement():
 
 def page_lecture(utz):
     """Page En cours de lecture : SEULEMENT 1 appel API (recuperer_lecture),
-    ne necessite PAS d'analyse complete pour fonctionner — evite les crashs.
-    Affiche progression, temps ecoule, temps restant, heure de fin, lien Trakt."""
+    ne necessite PAS d'analyse complete pour fonctionner.
+    Affiche progression, temps ecoule, temps restant, heure de fin, lien Trakt.
+    Si la duree manque (ex: Toy Story 5 pas sorti), on la recupere depuis la liste
+    des fantomes (/sync/playback) qui a toujours la bonne duree/progression."""
     st.subheader("▶️ En cours de lecture")
     at = st.session_state["access_token"]
-    # Rafraichir la lecture en temps reel a chaque visite (1 appel ultra-rapide)
     try:
         np = recuperer_lecture(at)
         st.session_state["np"] = np
@@ -1113,11 +1133,17 @@ def page_lecture(utz):
         🎬 Aucun contenu en lecture actuellement.
         </div>""", unsafe_allow_html=True)
         return
+
+    pb_data = st.session_state.get("pb", [])
+    pb_lookup = {}
+    for pb_item in pb_data:
+        key = ("e" if pb_item.get("type") == "Épisode" else "m", pb_item.get("titre",""))
+        pb_lookup[key] = pb_item
+
     try:
-        # --- Recuperer les infos du contenu ---
         started_at = np.get("started_at")
-        expires_at = np.get("expires_at")
         action_at = started_at or np.get("paused_at")
+        prog_dep_api = float(np.get("progress") or 0)
 
         is_episode = (np["type"] == "episode")
         if is_episode:
@@ -1132,19 +1158,17 @@ def page_lecture(utz):
                 titre += f" — {ep_titre}"
             annee = med_show.get("year")
             tc = "Épisode"
-            # Duree : priorite a l'episode, sinon la serie, sinon 0
             duree = (med_ep.get("runtime") or med_show.get("runtime") or 0)
             tmdb = med_show.get("ids", {}).get("tmdb")
             trakt_id = med_show.get("ids", {}).get("trakt")
-            # Slug est au niveau racine du show/movie dans la reponse Trakt extended
             slug_show = med_show.get("slug") or med_show.get("ids", {}).get("slug")
-            # Lien Trakt : slug prioritaire, sinon ID numerique qui marche toujours
-            if slug_show:
-                lien_trakt = f"https://trakt.tv/shows/{slug_show}/seasons/{saison}/episodes/{numero}"
-            elif trakt_id:
-                lien_trakt = f"https://trakt.tv/shows/{trakt_id}/seasons/{saison}/episodes/{numero}"
-            else:
-                lien_trakt = None
+            if duree <= 0:
+                key = ("e", titre)
+                if key in pb_lookup:
+                    duree = pb_lookup[key].get("duree", 0) or 0
+                    prog_dep_api = float(pb_lookup[key].get("prog", prog_dep_api) or prog_dep_api)
+            lien_trakt = (f"https://trakt.tv/shows/{slug_show}/seasons/{saison}/episodes/{numero}" if slug_show
+                          else (f"https://trakt.tv/shows/{trakt_id}/seasons/{saison}/episodes/{numero}" if trakt_id else None))
         else:
             med = np.get("movie", {})
             titre = med.get("title", "Film inconnu")
@@ -1154,13 +1178,14 @@ def page_lecture(utz):
             tmdb = med.get("ids", {}).get("tmdb")
             trakt_id = med.get("ids", {}).get("trakt")
             slug = med.get("slug") or med.get("ids", {}).get("slug")
-            lien_trakt = f"https://trakt.tv/movies/{slug}" if slug else (f"https://trakt.tv/movies/{trakt_id}" if trakt_id else None)
+            if duree <= 0:
+                key = ("m", titre)
+                if key in pb_lookup:
+                    duree = pb_lookup[key].get("duree", 0) or 0
+                    prog_dep_api = float(pb_lookup[key].get("prog", prog_dep_api) or prog_dep_api)
+            lien_trakt = (f"https://trakt.tv/movies/{slug}" if slug
+                          else (f"https://trakt.tv/movies/{trakt_id}" if trakt_id else None))
 
-        # --- Calcul de la progression et des temps ---
-        # Trakt renvoie 'progress' (0-100) : c'est LE % AU MOMENT OU LA LECTURE A REPRIS
-        # (quand on clique sur "reprendre" a 30%, progress=30, et started_at = l'heure OU ON A REPRIS).
-        # On recalcule la progression en temps reel a partir de la.
-        prog_depart = float(np.get("progress") or 0)
         debut = None
         fin = None
         temps_ecoule_str = ""
@@ -1172,51 +1197,28 @@ def page_lecture(utz):
             except Exception:
                 debut = None
 
-        # Si on a le debut ET une duree, on calcule tout correctement
         if debut and duree and duree > 0:
             maintenant_local = datetime.now(utz)
-            # Temps ecoule DEPUIS LA REPRISE
             ecoule_depuis_reprise_min = max(0, (maintenant_local - debut).total_seconds()) / 60
-            # Ajout du progres de depart (prog 30% = 30% de duree DEJA vu avant la reprise)
-            ecoule_total_min = (prog_depart/100.0)*duree + ecoule_depuis_reprise_min
+            ecoule_total_min = (prog_dep_api/100.0)*duree + ecoule_depuis_reprise_min
             prog = min(100.0, (ecoule_total_min / duree) * 100)
             restant_min = max(0, duree - ecoule_total_min)
-            # L'heure de fin : debut de reprise + temps restant
-            fin = debut + timedelta(minutes=restant_min + ecoule_depuis_reprise_min)
-
-            # Formatage temps total ecoule
+            fin = maintenant_local + timedelta(minutes=restant_min)
             em = int(round(ecoule_total_min))
-            if em >= 60:
-                temps_ecoule_str = f"{em//60}h{em%60:02d}"
-            else:
-                temps_ecoule_str = f"{em}min"
+            temps_ecoule_str = f"{em//60}h{em%60:02d}" if em >= 60 else f"{em}min"
             rm = int(round(restant_min))
-            if rm >= 60:
-                temps_restant_str = f"{rm//60}h{rm%60:02d}"
-            else:
-                temps_restant_str = f"{rm}min"
-        elif not duree or duree <= 0:
-            # Pas de runtime dans la reponse : fallback si on a expires_at
-            if debut and expires_at:
-                try:
-                    fin = datetime.fromisoformat(expires_at.replace("Z","+00:00")).astimezone(utz)
-                    # Duree = entre debut et fin
-                    duree = max(1, int((fin - debut).total_seconds()/60))
-                    maintenant_local = datetime.now(utz)
-                    ecoule_depuis_reprise_min = max(0, (maintenant_local - debut).total_seconds()/60)
-                    ecoule_total_min = (prog_depart/100.0)*duree + ecoule_depuis_reprise_min
-                    prog = min(100.0, (ecoule_total_min / duree)*100)
-                    restant_min = max(0, duree - ecoule_total_min)
-                    em = int(round(ecoule_total_min))
-                    temps_ecoule_str = f"{em//60}h{em%60:02d}" if em >=60 else f"{em}min"
-                    rm = int(round(restant_min))
-                    temps_restant_str = f"{rm//60}h{rm%60:02d}" if rm >=60 else f"{rm}min"
-                except Exception:
-                    prog = prog_depart
-            else:
-                prog = prog_depart
+            temps_restant_str = f"{rm//60}h{rm%60:02d}" if rm >= 60 else f"{rm}min"
+        elif duree > 0:
+            prog = prog_dep_api
+            em = int(round((prog_dep_api/100)*duree))
+            temps_ecoule_str = f"{em//60}h{em%60:02d}" if em >= 60 else f"{em}min"
+            rm = int(round(duree - em))
+            temps_restant_str = f"{rm//60}h{rm%60:02d}" if rm >= 60 else f"{rm}min"
+        else:
+            prog = prog_dep_api
+            temps_ecoule_str = "-"
+            temps_restant_str = "-"
 
-        # --- Affichage ---
         img = image_tmdb(tmdb, "tv" if is_episode else "movie") if tmdb else None
         ci, cd = st.columns([0.2,0.8])
         with ci:
@@ -1226,20 +1228,15 @@ def page_lecture(utz):
             else:
                 st.markdown("📺" if is_episode else "🎬")
         with cd:
-            duree_aff = format_minutes(duree) if duree and duree > 0 else "Calcul en cours..."
-            fin_aff = fin.strftime('%H:%M') if fin else "Calcul en cours..."
-            debut_aff = debut.strftime('%H:%M:%S') if debut else "Inconnue"
-            # Couleur barre selon progression
-            if prog < 30: cls = "progress-low"
-            elif prog < 80: cls = "progress-mid"
-            else: cls = "progress-high"
-
-            lien_html = ""
-            if lien_trakt:
-                lien_html = f'<a href="{lien_trakt}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.85em; margin-left:8px;">🔗 Voir sur Trakt</a>'
+            duree_aff = format_minutes(duree) if duree and duree > 0 else "-"
+            fin_aff = fin.strftime('%H:%M') if fin else "-"
+            debut_aff = debut.strftime('%H:%M:%S') if debut else "-"
+            cls = "progress-low" if prog < 30 else "progress-mid" if prog < 80 else "progress-high"
+            lien_html = (f'<a href="{lien_trakt}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.85em; margin-left:8px;">🔗 Voir sur Trakt</a>'
+                         if lien_trakt else "")
 
             st.markdown(f"""
-            <div class="now-playing-card">
+            <div class="now-playing-card carte-important">
                 <div style="font-size:0.85em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">▶️ EN LECTURE</div>
                 <div style="font-size:1.7em; font-weight:800; color:#F0FAF8; margin-bottom:4px;">{titre}</div>
                 <div style="font-size:1em; color:#9DC5BF; margin-bottom:16px;">{tc} {f'({annee})' if annee else ''} {lien_html}</div>
@@ -1260,64 +1257,25 @@ def page_lecture(utz):
                         <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{round(prog)}%</div>
                     </div>
                 </div>
-                <div style="display:grid; grid-template-columns: repeat(2,1fr); gap:14px; margin-top:14px;">
+                <div style="display:grid; grid-template-columns: repeat(3,1fr); gap:14px; margin-top:14px;">
                     <div>
                         <div style="font-size:0.75em; color:#9DC5BF; text-transform:uppercase;">Durée</div>
                         <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{duree_aff}</div>
                     </div>
                     <div>
                         <div style="font-size:0.75em; color:#9DC5BF; text-transform:uppercase;">⏱️ Déjà regardé</div>
-                        <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{temps_ecoule_str or '-'}</div>
+                        <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{temps_ecoule_str}</div>
                     </div>
                     <div>
                         <div style="font-size:0.75em; color:#9DC5BF; text-transform:uppercase;">⏳ Restant</div>
-                        <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{temps_restant_str or '-'}</div>
+                        <div style="font-size:1.05em; font-weight:600; color:#F0FAF8;">{temps_restant_str}</div>
                     </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            st.caption("La page se rafraîchit automatiquement. Les temps sont calculés en direct selon ton fuseau horaire.")
+            st.caption("Rafraîchis la page pour mettre à jour les temps.")
     except Exception as e:
         st.error(f"Erreur d'affichage de la lecture : {e}")
-
-
-def page_connexion():
-    if "dc" not in st.session_state:
-        st.write("Connecte ton compte Trakt pour commencer.")
-        if st.button("🚀 Se connecter à Trakt", type="primary"):
-            infos = demarrer_connexion()
-            st.session_state["dc"] = infos["device_code"]
-            st.session_state["uc"] = infos["user_code"]
-            st.session_state["vu"] = infos["verification_url"]
-            st.session_state["exp"] = infos["expires_in"]
-            st.session_state["iv"] = infos["interval"]
-            st.rerun()
-    else:
-        url = f"{st.session_state['vu']}/{st.session_state['uc']}"
-        cg, cd = st.columns(2)
-        with cg:
-            st.markdown(f'<a href="{url}" target="_blank" style="display:inline-block; background:linear-gradient(135deg,#00A392,#00524B); color:white; padding:0.9em 1.7em; border-radius:12px; text-decoration:none; font-weight:700;">Autoriser l\'accès</a>', unsafe_allow_html=True)
-            st.caption("Sur n'importe quel appareil.")
-            st.markdown(f"""
-            <div style="background: rgba(0,102,95,0.35); border:1px solid rgba(0,163,146,0.3); border-radius:14px; padding:18px; color:#F0FAF8; font-size:1.05em;">
-            Code : <b style="color:#CEDC00; font-size:1.3em; letter-spacing:3px;">{st.session_state['uc']}</b>
-            </div>""", unsafe_allow_html=True)
-        with cd:
-            st.image(qrcode_img(url), width=160)
-            st.caption("Ou scanne le QR code.")
-        st.caption("La page se met à jour automatiquement.")
-        with st.spinner("Attente de l'autorisation..."):
-            t=0
-            while t < st.session_state["exp"]:
-                time.sleep(st.session_state["iv"])
-                t += st.session_state["iv"]
-                tok = verifier_connexion(st.session_state["dc"])
-                if tok:
-                    sauvegarder_connexion(tok)
-                    del st.session_state["dc"]
-                    st.rerun()
-        st.error("Délai expiré.")
-        if st.button("Réessayer"): st.rerun()
 
 def page_dashboard(utz):
     if bloc_lancement(): return
