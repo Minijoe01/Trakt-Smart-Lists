@@ -421,6 +421,8 @@ st.markdown("""
         box-shadow: none !important;
     }
     .ghost-card:hover { border-left:4px solid var(--am-green); transform:translateX(4px); background: var(--am-bg-card-hover); }
+    /* La carte "en cours de lecture" ne doit PAS bouger au survol */
+    .ghost-card.carte-important:hover { transform: none; border-left:4px solid var(--am-lime); background: var(--am-bg-card); }
     .ghost-title { font-size:1.1em; font-weight:700; color: var(--am-text); margin-bottom:6px; }
     .ghost-meta { font-size:0.9em; color: var(--am-text-muted); margin-bottom:14px; }
     .progress-bar-container { width:100%; height:12px; background:rgba(6,59,55,0.8); border-radius:8px; overflow:hidden; }
@@ -874,40 +876,7 @@ def calculer_lecture(np, utz, pb_data=None):
         else:
             lien_trakt = None
 
-    # Fallback fantôme si durée inconnue (ex: film non sorti comme Toy Story 5)
-    key = ("e" if is_episode else "m", titre)
-    if duree_totale_min <= 0 and key in pb_lookup:
-        duree_totale_min = pb_lookup[key].get("duree", 0) or 0
-
-    # Progress live de l'API : c'est LE % TOTAL incluant la progression d'avant reprise
-    progress_pct = float(np.get("progress") or 0)
-
-    # FALLBACK INTELLIGENT : si progress=0 au démarrage de la session (le player n'a pas
-    # encore envoyé son premier heartbeat de reprise), et qu'on a une entrée fantôme
-    # récente pour ce même titre (c'est-à-dire que la lecture a été mise en pause
-    # récemment), on récupère la progression depuis le fantôme.
-    if progress_pct <= 0 and key in pb_lookup:
-        pb_item = pb_lookup[key]
-        # On ne fait ce fallback que si le fantôme date de moins de 10 minutes :
-        # sinon, c'est une ancienne progression qui n'a rien à voir avec la session
-        try:
-            dern = pb_item.get("dernier")
-            if dern:
-                dt_dern = datetime.fromisoformat(dern.replace("Z","+00:00")).astimezone(utz)
-                age_min = (datetime.now(utz) - dt_dern).total_seconds() / 60.0
-                if age_min < 10 and debut is not None:
-                    # Utiliser la progression du fantôme comme point de départ
-                    progress_pct = float(pb_item.get("prog", 0) or 0)
-                    # Et aussi récupérer la durée si besoin
-                    if duree_totale_min <= 0:
-                        duree_totale_min = pb_item.get("duree", 0) or 0
-        except Exception:
-            pass
-
-    # Clamp de sécurité
-    progress_pct = max(0.0, min(100.0, progress_pct))
-
-    # Dates
+    # Dates (À DEFINIR EN PREMIER pour que le fallback fantôme puisse utiliser `debut`)
     started_at_str = np.get("started_at")
     expires_at_str = np.get("expires_at")
     action_at = started_at_str or np.get("paused_at")
@@ -924,19 +893,64 @@ def calculer_lecture(np, utz, pb_data=None):
     except Exception:
         fin_expire = None
 
+    # Fallback fantôme si durée inconnue (ex: film non sorti comme Toy Story 5)
+    key = ("e" if is_episode else "m", titre)
+    if duree_totale_min <= 0 and key in pb_lookup:
+        duree_totale_min = pb_lookup[key].get("duree", 0) or 0
+
+    # Progress live de l'API : c'est LE % TOTAL incluant la progression d'avant reprise
+    progress_pct = float(np.get("progress") or 0)
+
+    # FALLBACK INTELLIGENT : si progress=0 au démarrage de la session (le player n'a pas
+    # encore envoyé son premier heartbeat de reprise), et qu'on a une entrée fantôme
+    # récente pour ce même titre (c'est-à-dire que la lecture a été mise en pause
+    # récemment), on récupère la progression depuis le fantôme.
+    fantome_recent = False
+    if progress_pct <= 0 and key in pb_lookup:
+        pb_item = pb_lookup[key]
+        try:
+            dern = pb_item.get("dernier")
+            if dern:
+                dt_dern = datetime.fromisoformat(dern.replace("Z","+00:00")).astimezone(utz)
+                age_min = (datetime.now(utz) - dt_dern).total_seconds() / 60.0
+                # On considère le fantome comme "récent" si la pause date de moins de 30 min,
+                # c'est cohérent avec la durée max d'expiration d'une session Trakt
+                if age_min < 30:
+                    fantome_recent = True
+                    # Utiliser la progression du fantôme comme point de départ
+                    progress_pct = float(pb_item.get("prog", 0) or 0)
+                    if duree_totale_min <= 0:
+                        duree_totale_min = pb_item.get("duree", 0) or 0
+        except Exception:
+            pass
+
+    # Clamp de sécurité
+    progress_pct = max(0.0, min(100.0, progress_pct))
+
     maintenant_local = datetime.now(utz)
+    ecoule_session_min = 0.0
+    if debut:
+        ecoule_session_min = max(0.0, (maintenant_local - debut).total_seconds() / 60.0)
 
     # Calcul temps : PRIORITÉ à runtime + progress (source de vérité)
     if duree_totale_min and duree_totale_min > 0:
-        ecoule_total_min = (progress_pct / 100.0) * duree_totale_min
+        # Cas 1 : on a récupéré la progression depuis un fantôme récent
+        # (= player n'a pas encore envoyé son 1er heartbeat de reprise).
+        # progress_pct représente ALORS le % AU MOMENT DE LA PAUSE,
+        # il faut y AJOUTER le temps de la session actuelle.
+        if fantome_recent:
+            ecoule_total_min = (progress_pct / 100.0) * duree_totale_min + ecoule_session_min
+        else:
+            # Cas 2 : progress live de l'API (mis à jour par les heartbeats).
+            # Il contient DÉJÀ la session actuelle en cours.
+            ecoule_total_min = (progress_pct / 100.0) * duree_totale_min
+        ecoule_total_min = max(0.0, min(ecoule_total_min, duree_totale_min))
         restant_min = max(0.0, duree_totale_min - ecoule_total_min)
+        progress_pct = (ecoule_total_min / duree_totale_min) * 100.0
         fin = maintenant_local + timedelta(minutes=restant_min)
         mode_calcul = "progress"
     else:
         # Pas de durée (contenu non sorti) : estimer depuis expires_at
-        ecoule_session_min = 0.0
-        if debut:
-            ecoule_session_min = max(0.0, (maintenant_local - debut).total_seconds() / 60.0)
         if fin_expire:
             # restant = temps jusqu'à expires_at (si le contenu est toujours en lecture)
             restant_calc = max(0.0, (fin_expire - maintenant_local).total_seconds() / 60.0)
@@ -1017,14 +1031,12 @@ def calculer_lecture(np, utz, pb_data=None):
 def rendre_carte_lecture(info, utz, compacte=False):
     """Rend une carte 'en cours de lecture' avec le même style que les fantômes :
     liseré lime à gauche, affiche + infos + barre de progression + stats + lien Trakt.
-    Si compacte=True (dashboard), mise en page plus dense.
+    Si compacte=True (dashboard), mise en page plus dense (tailles réduites).
     """
     if not info:
         return ""
     tmdb = info.get("tmdb")
-    img_url = None
-    if tmdb:
-        img_url = image_tmdb(tmdb, info["type_c"])
+    img_url = image_tmdb(tmdb, info["type_c"]) if tmdb else None
     lien_html = ""
     if info.get("lien_trakt"):
         lien_html = (f'<a href="{info["lien_trakt"]}" target="_blank" '
@@ -1032,16 +1044,17 @@ def rendre_carte_lecture(info, utz, compacte=False):
                      f'🔗 Voir sur Trakt</a>')
     ic = "📺" if info["is_episode"] else "🎬"
     an_part = f' ({info["annee"]})' if info.get("annee") else ""
+
     if compacte:
-        # Carte compacte pour dashboard : 4 colonnes d'infos
         pad = "14px 18px"
         titre_size = "1.15em"
         label_size = "0.72em"
         val_size = "0.95em"
         bar_h = "10px"
         meta_size = "0.88em"
-        badge = "▶️ EN LECTURE"
-        columns = 4
+        img_w = "72px"
+        img_h = "108px"
+        ic_size = "2em"
     else:
         pad = "22px 26px"
         titre_size = "1.55em"
@@ -1049,28 +1062,45 @@ def rendre_carte_lecture(info, utz, compacte=False):
         val_size = "1.05em"
         bar_h = "14px"
         meta_size = "0.98em"
-        badge = "▶️ EN LECTURE"
-        columns = 3
-    # Construction HTML de la carte directement, SANS colonnes Streamlit intermédiaires
-    # (pour garantir que le border-left s'applique bien sur toute la hauteur)
-    img_html = ""
+        img_w = "90px"
+        img_h = "130px"
+        ic_size = "2.4em"
+
+    # Affiche
     if img_url:
-        img_html = (f'<img src="{img_url}" style="border-radius:12px; width:90px; '
-                    f'min-width:90px; height:auto; object-fit:cover; display:block;" '
+        img_html = (f'<img src="{img_url}" style="border-radius:12px; width:{img_w}; '
+                    f'min-width:{img_w}; height:auto; object-fit:cover; display:block;" '
                     f'loading="lazy" />')
     else:
-        img_html = (f'<div style="width:90px; min-width:90px; height:130px; border-radius:12px; '
+        img_html = (f'<div style="width:{img_w}; min-width:{img_w}; height:{img_h}; border-radius:12px; '
                     f'background:rgba(5,38,34,0.6); display:flex; align-items:center; '
-                    f'justify-content:center; font-size:2.4em;">{ic}</div>')
-    grid_cols_stats = " ".join(["1fr"] * columns)
-    # Grille intérieure : affiche | bloc texte
+                    f'justify-content:center; font-size:{ic_size};">{ic}</div>')
+
+    # Grille UNIFORME de 6 stats (3col × 2lig), plus de HTML conditionnel
+    stats = [
+        ("Début",              info["debut_aff"]),
+        ("Fin estimée",        info["fin_aff"]),
+        ("⏱️ Déjà regardé",    info["ecoule_str"]),
+        ("Durée",              info["duree_aff"]),
+        ("⏳ Restant",          info["restant_str"]),
+        ("Progression",        f"{info['pct']}%"),
+    ]
+    stats_html_parts = []
+    for lbl, val in stats:
+        stats_html_parts.append(f"""
+            <div>
+              <div style="font-size:{label_size}; color:#9DC5BF; text-transform:uppercase; letter-spacing:0.5px;">{lbl}</div>
+              <div style="font-size:{val_size}; font-weight:600; color:#F0FAF8;">{val}</div>
+            </div>""")
+    stats_html = "\n".join(stats_html_parts)
+
     html = f"""
     <div class="ghost-card carte-important" style="padding:{pad};">
-      <div style="display:flex; gap:18px; align-items:flex-start;">
+      <div style="display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap;">
         <div style="flex-shrink:0;">{img_html}</div>
-        <div style="flex:1; min-width:0;">
-          <div style="font-size:0.8em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">{badge}</div>
-          <div class="ghost-title" style="font-size:{titre_size}; margin-bottom:4px;">
+        <div style="flex:1; min-width:220px;">
+          <div style="font-size:0.8em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">▶️ EN LECTURE</div>
+          <div class="ghost-title" style="font-size:{titre_size}; margin-bottom:4px; line-height:1.25;">
             {ic} {info['titre']}{an_part} {lien_html}
           </div>
           <div class="ghost-meta" style="font-size:{meta_size}; margin-bottom:14px;">
@@ -1079,42 +1109,8 @@ def rendre_carte_lecture(info, utz, compacte=False):
           <div class="progress-bar-container" style="height:{bar_h}; margin-bottom:14px;">
             <div class="progress-bar-fill {info['cls']}" style="width:{info['pct']}%;"></div>
           </div>
-          <div style="display:grid; grid-template-columns: {grid_cols_stats}; gap:12px;">
-            <div>
-              <div style="font-size:{label_size}; color:#9DC5BF; text-transform:uppercase; letter-spacing:0.5px;">Début</div>
-              <div style="font-size:{val_size}; font-weight:600; color:#F0FAF8;">{info['debut_aff']}</div>
-            </div>
-            <div>
-              <div style="font-size:{label_size}; color:#9DC5BF; text-transform:uppercase; letter-spacing:0.5px;">Fin estimée</div>
-              <div style="font-size:{val_size}; font-weight:600; color:#F0FAF8;">{info['fin_aff']}</div>
-            </div>
-            <div>
-              <div style="font-size:{label_size}; color:#9DC5BF; text-transform:uppercase; letter-spacing:0.5px;">⏱️ Déjà regardé</div>
-              <div style="font-size:{val_size}; font-weight:600; color:#F0FAF8;">{info['ecoule_str']}</div>
-            </div>
-    """
-    if columns >= 4:
-        html += f"""
-            <div>
-              <div style="font-size:{label_size}; color:#9DC5BF; text-transform:uppercase; letter-spacing:0.5px;">⏳ Restant</div>
-              <div style="font-size:{val_size}; font-weight:600; color:#F0FAF8;">{info['restant_str']}</div>
-            </div>
-        """
-    else:
-        # Ajouter restant + durée en 2e ligne de grille
-        html += f"""
-          </div>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:12px;">
-            <div>
-              <div style="font-size:{label_size}; color:#9DC5BF; text-transform:uppercase; letter-spacing:0.5px;">Durée</div>
-              <div style="font-size:{val_size}; font-weight:600; color:#F0FAF8;">{info['duree_aff']}</div>
-            </div>
-            <div>
-              <div style="font-size:{label_size}; color:#9DC5BF; text-transform:uppercase; letter-spacing:0.5px;">⏳ Restant</div>
-              <div style="font-size:{val_size}; font-weight:600; color:#F0FAF8;">{info['restant_str']}</div>
-            </div>
-        """
-    html += """
+          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;">
+            {stats_html}
           </div>
         </div>
       </div>
