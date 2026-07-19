@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import time
+import random
 import qrcode
 import io
 import pandas as pd
@@ -400,16 +401,6 @@ st.markdown("""
     button[kind="header"] { background: var(--am-bg-card) !important; backdrop-filter: blur(14px); border-radius:12px !important; border: 1px solid var(--am-border) !important; }
     div[role="progressbar"] > div { background: linear-gradient(90deg, var(--am-green) 0%, var(--am-lime) 100%) !important; }
 
-    .now-playing-card {
-        background: linear-gradient(135deg, rgba(0,102,95,0.3) 0%, rgba(4,46,43,0.75) 100%);
-        backdrop-filter: blur(16px);
-        border-radius: 20px;
-        padding: 24px;
-        border: 1px solid rgba(0,163,146,0.4);
-        box-shadow: none !important;
-        margin-bottom: 24px;
-    }
-
     .ghost-card {
         background: var(--am-bg-card);
         backdrop-filter: blur(14px);
@@ -716,6 +707,7 @@ def comparer(items, histo):
 
 def analyser(at, histo, barre=None):
     res, stats, app = [], [], {}
+    raw_items, _seen_raw = [], set()  # items bruts dédupliqués (pour les widgets dashboard/roulette)
     def aj(it, nom, lid):
         if it["type"] == "movie":
             med, t = it["movie"], "Film"
@@ -724,6 +716,9 @@ def analyser(at, histo, barre=None):
         else: return
         tid = med["ids"]["trakt"]
         cle = (t, tid)
+        if cle not in _seen_raw:
+            _seen_raw.add(cle)
+            raw_items.append(it)
         if cle not in app:
             app[cle] = {"titre":med["title"],"annee":med.get("year"),"type":t,"tid":tid,"tmdb":med["ids"].get("tmdb"),"dans":[]}
         app[cle]["dans"].append({"nom":nom,"lid":lid})
@@ -755,7 +750,7 @@ def analyser(at, histo, barre=None):
             doublons.append({"type":info["type"],"titre":info["titre"],"annee":info["annee"],"tmdb":info["tmdb"],"nb_listes":len(info["dans"]),"listes":", ".join(v["nom"] for v in info["dans"])})
             for v in info["dans"]:
                 doublons_det.append({"type":info["type"],"titre":info["titre"],"annee":info["annee"],"tid":info["tid"],"liste":v["nom"],"lid":v["lid"]})
-    return res, stats, doublons, doublons_det
+    return res, stats, doublons, doublons_det, raw_items, wl
 
 def recuperer_playback(at, barre=None):
     if barre: barre.progress(0.95, text="Recherche des fantômes...")
@@ -809,16 +804,18 @@ def recuperer_playback(at, barre=None):
     return res
 
 def calculer_lecture(np, utz, pb_data=None):
-    """Calcule les infos de lecture en cours de façon fiable (style TPPM).
+    """Calcule les infos de lecture en cours avec la METHODE TPPM FIABLE :
+    - expires_at est l'heure de FIN EXACTE du contenu, envoyée par Trakt au démarrage
+      de la session, qui INCLUT DÉJÀ le point de reprise (pas besoin de heartbeat).
+    - started_at = début de CETTE session (la reprise).
+    - runtime = durée totale du film/épisode (quand disponible).
+    - progress = % total mis à jour par heartbeat (bonus quand il arrive).
     
-    Logique Trakt :
-    - progress : % TOTAL en direct (mis à jour par les heartbeats du player,
-      inclut l'historique d'avant-reprise + la session actuelle)
-    - runtime : durée totale du film/épisode (quand disponible)
-    - started_at : démarrage de CETTE session (la reprise)
-    - expires_at : heure de FIN prévue (started_at + temps restant à la reprise)
-    Quand runtime=0 (contenu non sorti par ex.), on retombe sur le lookup fantôme,
-    puis sur expires_at comme estimation du restant.
+    Logique :
+      * restant = expires_at - now  (fiable, par Trakt)
+      * si runtime > 0 : écoulé_total = runtime - restant, pct = écoulé/runtime*100
+        (MARCHE MÊME SI progress=0 car expires_at tient compte de la reprise)
+      * si runtime = 0 : on affiche le temps de la session en cours + estimation via expires
     """
     if not np:
         return None
@@ -826,7 +823,7 @@ def calculer_lecture(np, utz, pb_data=None):
     if pb_data is None:
         pb_data = st.session_state.get("pb", [])
 
-    # Construire un index des fantômes pour le fallback durée/progression
+    # Construire un index des fantômes (pour le fallback durée si runtime=0)
     pb_lookup = {}
     for pb_item in pb_data:
         if pb_item.get("type") == "Épisode":
@@ -849,7 +846,7 @@ def calculer_lecture(np, utz, pb_data=None):
         annee = med_show.get("year")
         type_lib = "Épisode"
         type_c = "tv"
-        duree_totale_min = (med_ep.get("runtime") or med_show.get("runtime") or 0)
+        runtime = (med_ep.get("runtime") or med_show.get("runtime") or 0)
         tmdb = med_show.get("ids", {}).get("tmdb")
         trakt_id = med_show.get("ids", {}).get("trakt")
         slug = med_show.get("slug") or med_show.get("ids", {}).get("slug")
@@ -865,7 +862,7 @@ def calculer_lecture(np, utz, pb_data=None):
         annee = med.get("year")
         type_lib = "Film"
         type_c = "movie"
-        duree_totale_min = med.get("runtime") or 0
+        runtime = med.get("runtime") or 0
         tmdb = med.get("ids", {}).get("tmdb")
         trakt_id = med.get("ids", {}).get("trakt")
         slug = med.get("slug") or med.get("ids", {}).get("slug")
@@ -876,7 +873,7 @@ def calculer_lecture(np, utz, pb_data=None):
         else:
             lien_trakt = None
 
-    # Dates (À DEFINIR EN PREMIER pour que le fallback fantôme puisse utiliser `debut`)
+    # Dates
     started_at_str = np.get("started_at")
     expires_at_str = np.get("expires_at")
     action_at = started_at_str or np.get("paused_at")
@@ -893,138 +890,99 @@ def calculer_lecture(np, utz, pb_data=None):
     except Exception:
         fin_expire = None
 
-    # Fallback fantôme si durée inconnue (ex: film non sorti comme Toy Story 5)
+    # Fallback durée depuis fantôme si runtime=0 (contenu non sorti par ex.)
     key = ("e" if is_episode else "m", titre)
-    if duree_totale_min <= 0 and key in pb_lookup:
-        duree_totale_min = pb_lookup[key].get("duree", 0) or 0
+    if runtime <= 0 and key in pb_lookup:
+        runtime = pb_lookup[key].get("duree", 0) or 0
 
-    # Progress live de l'API : c'est LE % TOTAL incluant la progression d'avant reprise
-    progress_pct = float(np.get("progress") or 0)
+    maintenant = datetime.now(utz)
 
-    # FALLBACK INTELLIGENT : si progress=0 au démarrage de la session (le player n'a pas
-    # encore envoyé son premier heartbeat de reprise), et qu'on a une entrée fantôme
-    # récente pour ce même titre (c'est-à-dire que la lecture a été mise en pause
-    # récemment), on récupère la progression depuis le fantôme.
-    fantome_recent = False
-    if progress_pct <= 0 and key in pb_lookup:
-        pb_item = pb_lookup[key]
-        try:
-            dern = pb_item.get("dernier")
-            if dern:
-                dt_dern = datetime.fromisoformat(dern.replace("Z","+00:00")).astimezone(utz)
-                age_min = (datetime.now(utz) - dt_dern).total_seconds() / 60.0
-                # On considère le fantome comme "récent" si la pause date de moins de 30 min,
-                # c'est cohérent avec la durée max d'expiration d'une session Trakt
-                if age_min < 30:
-                    fantome_recent = True
-                    # Utiliser la progression du fantôme comme point de départ
-                    progress_pct = float(pb_item.get("prog", 0) or 0)
-                    if duree_totale_min <= 0:
-                        duree_totale_min = pb_item.get("duree", 0) or 0
-        except Exception:
-            pass
-
-    # Clamp de sécurité
-    progress_pct = max(0.0, min(100.0, progress_pct))
-
-    maintenant_local = datetime.now(utz)
+    # ---- CALCUL PRINCIPAL (methode TPPM) ----
     ecoule_session_min = 0.0
-    if debut:
-        ecoule_session_min = max(0.0, (maintenant_local - debut).total_seconds() / 60.0)
+    restant_min = 0.0
+    fin = fin_expire
+    pct = 0.0
+    note_session = False  # True si on n'affiche que la session (pas de données fiables)
 
-    # Calcul temps : PRIORITÉ à runtime + progress (source de vérité)
-    if duree_totale_min and duree_totale_min > 0:
-        # Cas 1 : on a récupéré la progression depuis un fantôme récent
-        # (= player n'a pas encore envoyé son 1er heartbeat de reprise).
-        # progress_pct représente ALORS le % AU MOMENT DE LA PAUSE,
-        # il faut y AJOUTER le temps de la session actuelle.
-        if fantome_recent:
-            ecoule_total_min = (progress_pct / 100.0) * duree_totale_min + ecoule_session_min
+    if debut:
+        ecoule_session_min = max(0.0, (maintenant - debut).total_seconds() / 60.0)
+
+    if fin_expire and fin_expire > maintenant:
+        # expires_at est l'heure de fin EXACTE donnée par Trakt (inclut la reprise)
+        restant_min = max(0.0, (fin_expire - maintenant).total_seconds() / 60.0)
+        if runtime > 0:
+            # On a la durée totale + la fin exacte → on peut en déduire le temps total vu
+            ecoule_total_min = max(0.0, runtime - restant_min)
+            pct = min(100.0, max(0.0, (ecoule_total_min / runtime) * 100.0))
         else:
-            # Cas 2 : progress live de l'API (mis à jour par les heartbeats).
-            # Il contient DÉJÀ la session actuelle en cours.
-            ecoule_total_min = (progress_pct / 100.0) * duree_totale_min
-        ecoule_total_min = max(0.0, min(ecoule_total_min, duree_totale_min))
-        restant_min = max(0.0, duree_totale_min - ecoule_total_min)
-        progress_pct = (ecoule_total_min / duree_totale_min) * 100.0
-        fin = maintenant_local + timedelta(minutes=restant_min)
-        mode_calcul = "progress"
+            # Pas de runtime (contenu non sorti) : on n'a que la durée de la session
+            # et expires_at comme estimation de fin
+            ecoule_total_min = ecoule_session_min
+            duree_estimee = ecoule_session_min + restant_min
+            if duree_estimee > 0:
+                pct = min(100.0, (ecoule_session_min / duree_estimee) * 100.0)
+            note_session = True
+    elif runtime > 0:
+        # Pas d'expires_at valide : fallback sur progress de l'API (heartbeat) OU
+        # la durée de la session — on prend le plus grand des deux, JAMAIS la somme,
+        # sinon la session serait comptée deux fois (progress l'inclut déjà).
+        progress_api = float(np.get("progress") or 0)
+        if progress_api > 0:
+            ecoule_total_min = max((progress_api / 100.0) * runtime, ecoule_session_min)
+        else:
+            ecoule_total_min = ecoule_session_min
+            note_session = True
+        ecoule_total_min = max(0.0, min(ecoule_total_min, runtime))
+        restant_min = max(0.0, runtime - ecoule_total_min)
+        pct = (ecoule_total_min / runtime) * 100.0 if runtime > 0 else 0
+        fin = maintenant + timedelta(minutes=restant_min)
     else:
-        # Pas de durée (contenu non sorti) : estimer depuis expires_at
-        if fin_expire:
-            # restant = temps jusqu'à expires_at (si le contenu est toujours en lecture)
-            restant_calc = max(0.0, (fin_expire - maintenant_local).total_seconds() / 60.0)
-            # Si expires_at est dans le futur, c'est une bonne estimation du restant
-            if restant_calc > 0:
-                restant_min = restant_calc
-                # On estime la durée totale via (expires_at - started_at) + ecoulé avant reprise
-                # Sans resume %, on ne sait pas ; on affiche ce qu'on a
-                duree_session_min = max(0.0, (fin_expire - debut).total_seconds() / 60.0) if debut else restant_min
-                # Sans durée totale, le % affiché = pourcentage de la session
-                # Si progress de l'API > 0, on lui fait confiance
-                if progress_pct > 0:
-                    ecoule_total_min = ecoule_session_min
-                    # On ne peut pas extrapoler ; on prend le progress API comme indication
-                else:
-                    ecoule_total_min = ecoule_session_min
-                    # progress% de la session
-                    if duree_session_min > 0:
-                        progress_pct = min(100.0, (ecoule_session_min / duree_session_min) * 100.0)
-                fin = fin_expire
-                mode_calcul = "expires"
-            else:
-                # expires_at est passé, session finie
-                restant_min = 0
-                ecoule_total_min = ecoule_session_min
-                fin = maintenant_local
-                mode_calcul = "expires_past"
-        else:
-            # Sans aucune info : on prend progress au pied de la lettre
-            restant_min = 0
-            ecoule_total_min = 0
-            fin = None
-            mode_calcul = "none"
+        # Rien du tout : juste la session
+        ecoule_total_min = ecoule_session_min
+        restant_min = 0
+        fin = None
+        pct = 0
+        note_session = True
 
     # Formatage
     def fmt_min(mm):
-        mm = int(round(mm))
+        mm = int(round(max(0, mm)))
         if mm <= 0:
             return "0min"
         h = mm // 60
         m = mm % 60
         return f"{h}h{m:02d}" if h > 0 else f"{m}min"
 
-    duree_aff = format_minutes(int(round(duree_totale_min))) if duree_totale_min and duree_totale_min > 0 else (
+    duree_aff = format_minutes(int(round(runtime))) if runtime and runtime > 0 else (
         fmt_min(ecoule_total_min + restant_min) if (ecoule_total_min + restant_min) > 0 else "-"
     )
     debut_aff = debut.strftime("%H:%M:%S") if debut else "-"
     fin_aff = fin.strftime("%H:%M") if fin else "-"
     ecoule_str = fmt_min(ecoule_total_min)
     restant_str = fmt_min(restant_min)
-    pct = int(round(progress_pct))
-    cls = "progress-low" if pct < 30 else "progress-mid" if pct < 80 else "progress-high"
+    pct_int = int(round(pct))
+    cls = "progress-low" if pct_int < 30 else "progress-mid" if pct_int < 80 else "progress-high"
 
     return {
         "is_episode": is_episode,
         "type_lib": type_lib,
         "type_c": type_c,
         "titre": titre,
-        "titre_court": med.get("title") if not is_episode else titre_show,
         "annee": annee,
         "tmdb": tmdb,
-        "duree_min": duree_totale_min,
+        "duree_min": runtime,
         "duree_aff": duree_aff,
         "debut": debut,
         "debut_aff": debut_aff,
         "fin": fin,
         "fin_aff": fin_aff,
-        "pct": pct,
+        "pct": pct_int,
         "cls": cls,
         "ecoule_str": ecoule_str,
         "restant_str": restant_str,
         "lien_trakt": lien_trakt,
-        "img": None,  # sera renseigné au besoin avec image_tmdb
-        "mode": mode_calcul,
+        "note_session": note_session,
+        "ecoule_session_min": int(round(ecoule_session_min)),
     }
 
 
@@ -1071,10 +1029,11 @@ def rendre_carte_lecture(info, utz, compacte=False):
     else:
         img_html = '<div style="width:{}; min-width:{}; height:{}; border-radius:12px; background:rgba(5,38,34,0.6); display:flex; align-items:center; justify-content:center; font-size:{};">{}</div>'.format(img_w, img_w, img_h, ic_size, ic)
     # Construire les 6 blocs stats SANS saut de ligne ni indentation profonde
+    deja_label = "⏱️ Cette session" if info.get("note_session") else "⏱️ Déjà regardé"
     stats = [
         ("Début", info["debut_aff"]),
         ("Fin estimée", info["fin_aff"]),
-        ("⏱️ Déjà regardé", info["ecoule_str"]),
+        (deja_label, info["ecoule_str"]),
         ("Durée", info["duree_aff"]),
         ("⏳ Restant", info["restant_str"]),
         ("Progression", "{}%".format(info["pct"])),
@@ -1087,6 +1046,14 @@ def rendre_carte_lecture(info, utz, compacte=False):
             '<div style="font-size:{}; font-weight:600; color:#F0FAF8;">{}</div>'
             '</div>'
         ).format(label_size, lbl, val_size, val)
+    # Petite note d'information quand le % correspond à la session uniquement
+    note_html = ""
+    if info.get("note_session"):
+        note_html = (
+            '<div style="margin-top:10px; font-size:0.8em; color:#9DC5BF;">'
+            '💡 Le player n\'a pas encore transmis la position exacte de reprise — affichage du temps écoulé depuis le démarrage de la session.'
+            '</div>'
+        )
     # Assemblage final : une seule div par ligne, pas d'indentation profonde
     html = (
         '<div class="ghost-card carte-important" style="padding:{};">'
@@ -1102,6 +1069,7 @@ def rendre_carte_lecture(info, utz, compacte=False):
         '<div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;">'
         '{}'
         '</div>'
+        '{}'
         '</div>'
         '</div>'
         '</div>'
@@ -1110,7 +1078,8 @@ def rendre_carte_lecture(info, utz, compacte=False):
         titre_size, ic, info["titre"], an_part, lien_html,
         meta_size, info["type_lib"], info["duree_aff"], info["pct"],
         bar_h, info["cls"], info["pct"],
-        stats_html
+        stats_html,
+        note_html
     )
     return html
 
@@ -1120,13 +1089,15 @@ def lancer_analyse(rafraichir=False, page_suivante="🏠 Tableau de bord"):
     try:
         if rafraichir or "historique" not in st.session_state:
             st.session_state["historique"] = recuperer_historique(st.session_state["access_token"], barre)
-        res, stats, doub, doub_det = analyser(st.session_state["access_token"], st.session_state["historique"], barre)
+        res, stats, doub, doub_det, raw_items, raw_wl = analyser(st.session_state["access_token"], st.session_state["historique"], barre)
         pb = recuperer_playback(st.session_state["access_token"], barre)
         np = recuperer_lecture(st.session_state["access_token"])
         st.session_state["res"] = res
         st.session_state["stats"] = stats
         st.session_state["doub"] = doub
         st.session_state["doub_det"] = doub_det
+        st.session_state["raw_items"] = raw_items  # items bruts de TOUTES les listes (dédupliqués)
+        st.session_state["raw_wl"] = raw_wl        # items bruts de la liste de suivi (accès listed_at)
         st.session_state["pb"] = pb
         st.session_state["np"] = np
         st.session_state["page_active"] = page_suivante
@@ -1374,13 +1345,15 @@ def entete():
         with c1:
             if st.button("🔄 Analyse rapide", use_container_width=True):
                 for k in ["res","stats","doub","doub_det","pb","np","_xl_cache",
-                          "_cal_items","_cal_last_key","_qr_resultats","_qr_last_key"]:
+                          "_cal_items","_cal_last_key","_qr_resultats","_qr_last_key",
+                          "raw_items","raw_wl","_roulette","_roulette_actuel"]:
                     st.session_state.pop(k, None)
                 lancer_analyse(False, st.session_state["page_active"])
         with c2:
             if st.button("🔃 Rafraîchir tout", use_container_width=True):
                 for k in ["historique","res","stats","doub","doub_det","pb","np","infos","_xl_cache",
-                          "_cal_items","_cal_last_key","_img_cache","_qr_resultats","_qr_last_key"]:
+                          "_cal_items","_cal_last_key","_img_cache","_qr_resultats","_qr_last_key",
+                          "raw_items","raw_wl","_roulette","_roulette_actuel"]:
                     st.session_state.pop(k, None)
                 st.rerun()
         with c3:
@@ -1519,6 +1492,133 @@ def page_connexion():
         if st.button("Réessayer"): st.rerun()
 
 
+
+def widget_sorties_semaine(utz):
+    """TODO #1 : jusqu'a 3 films de tes listes qui sortent dans les 7 prochains jours.
+    Utilise les items bruts déjà récupérés pendant l'analyse -> ZÉRO appel API supplémentaire."""
+    raw = st.session_state.get("raw_items", [])
+    if not raw:
+        return
+    ajd = datetime.now(utz).date()
+    sorties = []
+    for it in raw:
+        if it.get("type") != "movie":
+            continue
+        m = it.get("movie") or {}
+        rel = m.get("released")
+        if not rel:
+            continue
+        try:
+            ds = datetime.strptime(rel, "%Y-%m-%d").date()
+        except Exception:
+            continue
+        j = (ds - ajd).days
+        if 0 <= j <= 7:
+            ids = m.get("ids", {}) or {}
+            slug = m.get("slug") or ids.get("slug")
+            if slug:
+                lien = f"https://trakt.tv/movies/{slug}"
+            elif ids.get("trakt"):
+                lien = f"https://trakt.tv/movies/{ids['trakt']}"
+            else:
+                lien = None
+            sorties.append({"j": j, "ds": ds, "titre": m.get("title", ""), "annee": m.get("year"),
+                            "note": m.get("rating") or 0, "tmdb": ids.get("tmdb"), "lien": lien})
+    if not sorties:
+        return
+    sorties.sort(key=lambda x: (x["j"], -x["note"]))
+    sorties = sorties[:3]
+    st.divider()
+    st.markdown("### 🔔 Sorties cette semaine")
+    cols = st.columns(len(sorties))
+    for i, s in enumerate(sorties):
+        with cols[i]:
+            with st.container(border=True):
+                img = image_tmdb(s["tmdb"], "movie") if s["tmdb"] else None
+                if img:
+                    st.image(img, use_container_width=True)
+                lien_html = f' <a href="{s["lien"]}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.85em;">🔗</a>' if s["lien"] else ""
+                an = f" ({s['annee']})" if s["annee"] else ""
+                st.markdown(f"**{s['titre']}**{an}{lien_html}", unsafe_allow_html=True)
+                if s["j"] == 0:
+                    quand = "🎉 Aujourd'hui !"
+                elif s["j"] == 1:
+                    quand = "Demain"
+                else:
+                    quand = f"Dans {s['j']} jours"
+                note_txt = f" · ⭐ {s['note']:.1f}" if s["note"] and s["note"] > 0 else ""
+                st.caption(f"📅 {s['ds'].strftime('%d/%m/%Y')} · {quand}{note_txt}")
+
+
+def widget_coups_de_coeur(h):
+    """TODO #6 : tes 5 films/séries les mieux notés parmi ceux que tu as vus
+    (note communauté Trakt). Données déjà en mémoire -> ZÉRO appel API."""
+    best = {}
+    for m in h.get("films_det", []):
+        n = m.get("note") or 0
+        if n >= 9:
+            k = ("Film", m["id"])
+            if k not in best or n > best[k]["note"]:
+                best[k] = {"type": "Film", "titre": m["titre"], "annee": m.get("annee"),
+                           "note": n, "id": m["id"]}
+    for e in h.get("ep_det", []):
+        n = e.get("note") or 0
+        if n >= 9:
+            k = ("Série", e["id"])
+            if k not in best or n > best[k]["note"]:
+                best[k] = {"type": "Série", "titre": e["serie"], "annee": e.get("annee"),
+                           "note": n, "id": e["id"]}
+    if not best:
+        return
+    top = sorted(best.values(), key=lambda x: -x["note"])[:5]
+    st.divider()
+    st.markdown("### ⭐ Mes coups de cœur")
+    st.caption("Les contenus que tu as déjà vus et qui sont les mieux notés par la communauté Trakt (9+ /10). De bons candidats à revoir !")
+    with st.container(border=True):
+        cols = st.columns(len(top))
+        for i, c in enumerate(top):
+            ic = "🎬" if c["type"] == "Film" else "📺"
+            an = f" ({c['annee']})" if c.get("annee") else ""
+            with cols[i]:
+                st.markdown(f"{ic} **{c['titre']}**{an}")
+                st.caption(f"⭐ **{c['note']:.1f}**/10")
+
+
+def widget_plus_ancien_watchlist(utz):
+    """TODO #5 : le contenu ajouté depuis le plus longtemps à ta liste de suivi.
+    Calculé sur les items déjà chargés -> ZÉRO appel API."""
+    raw_wl = st.session_state.get("raw_wl", [])
+    if not raw_wl:
+        return
+    mt = datetime.now(utz)
+    ancien = None
+    for it in raw_wl:
+        la = it.get("_listed_at")
+        if not la:
+            continue
+        try:
+            dt_l = datetime.fromisoformat(la.replace("Z", "+00:00")).astimezone(utz)
+        except Exception:
+            continue
+        if ancien is None or dt_l < ancien[0]:
+            if it["type"] == "movie":
+                t = it["movie"].get("title", "?")
+            elif it["type"] == "show":
+                t = it["show"].get("title", "?")
+            else:
+                continue
+            ancien = (dt_l, t)
+    if ancien:
+        dt_l, t = ancien
+        jours = (mt - dt_l).days
+        if jours >= 60:  # on ne l'affiche que si ça commence à dater
+            if jours >= 365:
+                age = f"{jours // 365} an" + ("s" if jours >= 730 else "")
+            else:
+                age = f"{jours // 30} mois"
+            st.caption(f"🕰️ Le plus vieux contenu de ta liste de suivi est **{t}**, ajouté il y a **{age}**. Toujours pas regardé ? 😉")
+
+
 def page_dashboard(utz):
     if bloc_lancement(): return
     h = st.session_state["historique"]
@@ -1554,6 +1654,12 @@ def page_dashboard(utz):
                 st.markdown(html_lec, unsafe_allow_html=True)
         except Exception:
             pass
+
+    # --- Widgets découverte : sorties de la semaine + coups de cœur + plus vieux item ---
+    # (utilisent uniquement les données déjà chargées par l'analyse : ZÉRO appel API)
+    widget_sorties_semaine(utz)
+    widget_coups_de_coeur(h)
+    widget_plus_ancien_watchlist(utz)
 
     # --- ETAT DU NETTOYAGE : ordonné Fantômes → Déjà vus → Doublons comme dans le menu ---
     st.divider()
@@ -1624,7 +1730,8 @@ def page_dashboard(utz):
                         st.success(f"✅ Nettoyage terminé")
                         del st.session_state["conf_tout"]
                         time.sleep(2)
-                        for k in ["res","stats","doub","doub_det","pb","np","_cal_items","_cal_last_key","_qr_resultats","_qr_last_key"]:
+                        for k in ["res","stats","doub","doub_det","pb","np","_cal_items","_cal_last_key","_qr_resultats","_qr_last_key",
+                                  "raw_items","raw_wl","_roulette","_roulette_actuel"]:
                             st.session_state.pop(k, None)
                         st.rerun()
                 with cn:
@@ -2750,6 +2857,7 @@ def page_quoi_regarder(utz):
     # seulement quand on change de liste selectionnee (comme le calendrier)
     cache_key_qr = ("qr_resultats", lid_nom)
     if st.session_state.get("_qr_last_key") != cache_key_qr:
+        st.session_state.pop("_roulette", None)  # nouvelle liste -> nouvelle pioche
         with st.spinner("Analyse intelligente de la liste..."):
             try:
                 if lid_nom == "watchlist":
@@ -2817,6 +2925,57 @@ def page_quoi_regarder(utz):
         Aucun contenu à évaluer dans cette liste.
         </div>""", unsafe_allow_html=True)
         return
+
+    # TODO #2 : 🎲 Roulette — pioche au hasard dans les résultats DÉJÀ chargés (aucun appel API)
+    col_roul, _ = st.columns([0.4, 0.6])
+    with col_roul:
+        if st.button("🎲 Roulette — Je ne sais pas quoi regarder", use_container_width=True, key="btn_roulette"):
+            pool = [r for r in resultats if r["score"] >= 70 and not r.get("pas_pour_moi")]
+            if not pool:  # si rien a 70+, on prend le top 10 dispo
+                pool = sorted(resultats, key=lambda x: -x["score"])[:10]
+            pool = [r for r in pool if r.get("titre") != st.session_state.get("_roulette_actuel")]
+            if pool:
+                choix = random.choice(pool)
+                st.session_state["_roulette"] = choix
+                st.session_state["_roulette_actuel"] = choix["titre"]
+                st.rerun()
+            elif resultats:
+                choix = random.choice(resultats)
+                st.session_state["_roulette"] = choix
+                st.session_state["_roulette_actuel"] = choix["titre"]
+                st.rerun()
+
+    roul = st.session_state.get("_roulette")
+    if roul:
+        with st.container(border=True):
+            ci, cm = st.columns([0.10, 0.90])
+            with ci:
+                tmdb_r = roul.get("tmdb")
+                img_r = image_tmdb(tmdb_r, "movie" if roul["type"] == "Film" else "tv") if tmdb_r else None
+                if img_r:
+                    st.image(img_r, use_container_width=True)
+                else:
+                    st.markdown("🎬" if roul["type"] == "Film" else "📺")
+            with cm:
+                an_r = f" ({roul['annee']})" if roul.get("annee") else ""
+                lien_r = roul.get("lien")
+                lien_html_r = f' <a href="{lien_r}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.9em;">🔗</a>' if lien_r else ""
+                st.markdown(f"🎲 **Le hasard a choisi : {roul['type']} — {roul['titre']}{an_r}**{lien_html_r}", unsafe_allow_html=True)
+                note_r = f"{roul['note']}/10" if roul.get("note") else "Note inconnue"
+                ep_r = f" · 📺 {roul['nb_episodes']} ép." if roul["type"] == "Série" and roul.get("nb_episodes", 0) > 0 else ""
+                st.caption(f"⭐ {note_r} · ⏱️ {roul['temps']} · 🎭 {roul['genres']}{ep_r} · Score {int(roul['score'])}/100")
+                st.progress(min(int(roul["score"]), 100) / 100)
+                if roul.get("raisons"):
+                    st.markdown(" · ".join(f":green[✅ {x}]" for x in roul["raisons"]))
+                if st.button("🎲 Une autre ?", key="btn_roulette_next"):
+                    pool = [r for r in resultats if r["score"] >= 70 and not r.get("pas_pour_moi") and r["titre"] != roul["titre"]]
+                    if not pool:
+                        pool = sorted([r for r in resultats if r["titre"] != roul["titre"]], key=lambda x: -x["score"])[:10]
+                    if pool:
+                        choix = random.choice(pool)
+                        st.session_state["_roulette"] = choix
+                        st.session_state["_roulette_actuel"] = choix["titre"]
+                    st.rerun()
 
     # Barre de recherche TITRE (en memoire, instantane, aucun appel API)
     recherche_qr = st.text_input("🔍 Rechercher un titre", placeholder="Nom du film ou de la série...", key="qr_search")
