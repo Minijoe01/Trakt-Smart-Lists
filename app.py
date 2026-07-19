@@ -961,6 +961,11 @@ def generer_excel(pseudo, histo, res, stats, doub, pb, utz, at=None):
 # ==================================================
 
 def naviguer():
+    # Ordre logique :
+    # 1. Accueil / Action / Maintenance (haut)
+    # 2. Listes intelligentes / découverte
+    # 3. Stats
+    # 4. Compte / succès / sauvegarde (bas)
     PAGES = [
         "🏠 Tableau de bord",
         "▶️ En cours de lecture",
@@ -968,11 +973,11 @@ def naviguer():
         "🧹 Nettoyage des listes",
         "🔍 Recherche de doublons",
         "🎯 Que regarder ?",
-        "📊 Statistiques",
         "📅 Calendrier des sorties",
+        "📊 Statistiques",
         "🎬 Rendez-vous annuel",
-        "📤 Sauvegarde",
         "🏆 Succès",
+        "📤 Sauvegarde",
     ]
     if "page_active" not in st.session_state:
         st.session_state["page_active"] = PAGES[0]
@@ -1152,8 +1157,10 @@ def page_lecture(utz):
             lien_trakt = f"https://trakt.tv/movies/{slug}" if slug else (f"https://trakt.tv/movies/{trakt_id}" if trakt_id else None)
 
         # --- Calcul de la progression et des temps ---
-        # Trakt renvoie 'progress' directement si disponible, sinon on le calcule
-        prog = float(np.get("progress") or 0)
+        # Trakt renvoie 'progress' (0-100) : c'est LE % AU MOMENT OU LA LECTURE A REPRIS
+        # (quand on clique sur "reprendre" a 30%, progress=30, et started_at = l'heure OU ON A REPRIS).
+        # On recalcule la progression en temps reel a partir de la.
+        prog_depart = float(np.get("progress") or 0)
         debut = None
         fin = None
         temps_ecoule_str = ""
@@ -1165,43 +1172,49 @@ def page_lecture(utz):
             except Exception:
                 debut = None
 
-        # Si on a le debut ET une duree, on calcule tout
+        # Si on a le debut ET une duree, on calcule tout correctement
         if debut and duree and duree > 0:
             maintenant_local = datetime.now(utz)
-            ecoule_sec = max(0, (maintenant_local - debut).total_seconds())
-            ecoule_min = ecoule_sec / 60
-            # Progression recalculee a la seconde pres (plus frais que celle renvoyee par Trakt)
-            prog = min(100.0, (ecoule_min / duree) * 100)
-            restant_min = max(0, duree - ecoule_min)
-            fin = debut + timedelta(minutes=duree)
+            # Temps ecoule DEPUIS LA REPRISE
+            ecoule_depuis_reprise_min = max(0, (maintenant_local - debut).total_seconds()) / 60
+            # Ajout du progres de depart (prog 30% = 30% de duree DEJA vu avant la reprise)
+            ecoule_total_min = (prog_depart/100.0)*duree + ecoule_depuis_reprise_min
+            prog = min(100.0, (ecoule_total_min / duree) * 100)
+            restant_min = max(0, duree - ecoule_total_min)
+            # L'heure de fin : debut de reprise + temps restant
+            fin = debut + timedelta(minutes=restant_min + ecoule_depuis_reprise_min)
 
-            # Formatage temps
-            if ecoule_min >= 60:
-                eh = int(ecoule_min // 60)
-                em = int(round(ecoule_min % 60))
-                temps_ecoule_str = f"{eh}h{em:02d}"
+            # Formatage temps total ecoule
+            em = int(round(ecoule_total_min))
+            if em >= 60:
+                temps_ecoule_str = f"{em//60}h{em%60:02d}"
             else:
-                temps_ecoule_str = f"{int(round(ecoule_min))}min"
-            if restant_min >= 60:
-                rh = int(restant_min // 60)
-                rm = int(round(restant_min % 60))
-                temps_restant_str = f"{rh}h{rm:02d}"
+                temps_ecoule_str = f"{em}min"
+            rm = int(round(restant_min))
+            if rm >= 60:
+                temps_restant_str = f"{rm//60}h{rm%60:02d}"
             else:
-                temps_restant_str = f"{int(round(restant_min))}min"
+                temps_restant_str = f"{rm}min"
         elif not duree or duree <= 0:
             # Pas de runtime dans la reponse : fallback si on a expires_at
             if debut and expires_at:
                 try:
                     fin = datetime.fromisoformat(expires_at.replace("Z","+00:00")).astimezone(utz)
+                    # Duree = entre debut et fin
                     duree = max(1, int((fin - debut).total_seconds()/60))
                     maintenant_local = datetime.now(utz)
-                    ecoule_min = max(0, (maintenant_local - debut).total_seconds()/60)
-                    prog = min(100.0, (ecoule_min / duree) * 100)
-                    restant_min = max(0, duree - ecoule_min)
-                    temps_ecoule_str = f"{int(round(ecoule_min))}min"
-                    temps_restant_str = f"{int(round(restant_min))}min"
+                    ecoule_depuis_reprise_min = max(0, (maintenant_local - debut).total_seconds()/60)
+                    ecoule_total_min = (prog_depart/100.0)*duree + ecoule_depuis_reprise_min
+                    prog = min(100.0, (ecoule_total_min / duree)*100)
+                    restant_min = max(0, duree - ecoule_total_min)
+                    em = int(round(ecoule_total_min))
+                    temps_ecoule_str = f"{em//60}h{em%60:02d}" if em >=60 else f"{em}min"
+                    rm = int(round(restant_min))
+                    temps_restant_str = f"{rm//60}h{rm%60:02d}" if rm >=60 else f"{rm}min"
                 except Exception:
-                    pass
+                    prog = prog_depart
+            else:
+                prog = prog_depart
 
         # --- Affichage ---
         img = image_tmdb(tmdb, "tv" if is_episode else "movie") if tmdb else None
@@ -1323,8 +1336,95 @@ def page_dashboard(utz):
     c3.metric("🎞️ Épisodes", h["nb_ep"])
     c4.metric("⏱️ Temps total", format_duree(th))
 
+    # --- 1. EN COURS DE LECTURE direct sur le dashboard ---
+    st.divider()
+    np = st.session_state.get("np")
+    at = st.session_state.get("access_token")
+    if at:
+        try:
+            np = recuperer_lecture(at)
+            st.session_state["np"] = np
+        except Exception:
+            np = None
+    if np:
+        st.subheader("▶️ En cours de lecture")
+        try:
+            is_episode = (np["type"] == "episode")
+            if is_episode:
+                med_show = np.get("show", {})
+                med_ep = np.get("episode", {})
+                titre_show = med_show.get("title", "")
+                titre = f"{titre_show} — S{med_ep.get('season',0):02d}E{med_ep.get('number',0):02d}"
+                if med_ep.get("title"): titre += f" — {med_ep['title']}"
+                annee = med_show.get("year")
+                duree = med_ep.get("runtime") or med_show.get("runtime") or 0
+                tmdb = med_show.get("ids",{}).get("tmdb")
+                slug = med_show.get("slug") or med_show.get("ids",{}).get("slug")
+                lien = f"https://trakt.tv/shows/{slug}/seasons/{med_ep.get('season',0)}/episodes/{med_ep.get('number',0)}" if slug else None
+            else:
+                med = np.get("movie", {})
+                titre = med.get("title","")
+                annee = med.get("year")
+                duree = med.get("runtime") or 0
+                tmdb = med.get("ids",{}).get("tmdb")
+                slug = med.get("slug") or med.get("ids",{}).get("slug")
+                lien = f"https://trakt.tv/movies/{slug}" if slug else None
+            action_at = np.get("started_at") or np.get("paused_at")
+            prog_dep = float(np.get("progress") or 0)
+            debut = fin = None
+            ecoule_str = restant_str = ""
+            if action_at and duree>0:
+                try:
+                    debut = datetime.fromisoformat(action_at.replace("Z","+00:00")).astimezone(utz)
+                    now = datetime.now(utz)
+                    ecoule_rep = max(0,(now-debut).total_seconds())/60
+                    ecoule_total = (prog_dep/100)*duree + ecoule_rep
+                    prog = min(100.0, ecoule_total/duree*100)
+                    restant = max(0, duree - ecoule_total)
+                    fin = now + timedelta(minutes=restant)
+                    em = int(round(ecoule_total))
+                    ecoule_str = f"{em//60}h{em%60:02d}" if em>=60 else f"{em}min"
+                    rm = int(round(restant))
+                    restant_str = f"{rm//60}h{rm%60:02d}" if rm>=60 else f"{rm}min"
+                except Exception:
+                    prog = prog_dep
+            else:
+                prog = prog_dep
+            img = image_tmdb(tmdb, "tv" if is_episode else "movie") if tmdb else None
+            lien_html = f'<a href="{lien}" target="_blank" style="color:#CEDC00; text-decoration:none; margin-left:8px;">🔗 Trakt</a>' if lien else ""
+            cls = "progress-low" if prog<30 else "progress-mid" if prog<80 else "progress-high"
+            with st.container(border=True):
+                ci, cd = st.columns([0.10, 0.90])
+                with ci:
+                    if img:
+                        try: st.image(img, use_container_width=True)
+                        except: st.markdown("📺" if is_episode else "🎬")
+                    else:
+                        st.markdown("📺" if is_episode else "🎬")
+                with cd:
+                    st.markdown(f"""
+                    <div style="padding:10px 0;">
+                        <div style="font-size:0.8em; color:#CEDC00; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">▶️ EN LECTURE</div>
+                        <div style="font-size:1.3em; font-weight:800; color:#F0FAF8; margin-bottom:4px;">{titre} {lien_html}</div>
+                        <div style="font-size:0.9em; color:#9DC5BF; margin-bottom:12px;">{"Épisode" if is_episode else "Film"} {f'({annee})' if annee else ''}</div>
+                        <div class="progress-bar-container" style="height:10px; margin-bottom:10px;">
+                            <div class="progress-bar-fill {cls}" style="width:{round(prog,1)}%"></div>
+                        </div>
+                        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; font-size:0.9em;">
+                            <div><span style="color:#9DC5BF; text-transform:uppercase; font-size:0.75em;">Début</span><br><b style="color:#F0FAF8;">{debut.strftime('%H:%M') if debut else '-'}</b></div>
+                            <div><span style="color:#9DC5BF; text-transform:uppercase; font-size:0.75em;">Fin</span><br><b style="color:#F0FAF8;">{fin.strftime('%H:%M') if fin else '-'}</b></div>
+                            <div><span style="color:#9DC5BF; text-transform:uppercase; font-size:0.75em;">Déjà vu</span><br><b style="color:#F0FAF8;">{ecoule_str or '-'}</b></div>
+                            <div><span style="color:#9DC5BF; text-transform:uppercase; font-size:0.75em;">Restant</span><br><b style="color:#F0FAF8;">{restant_str or '-'}</b></div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        except Exception:
+            pass
+
+    # --- ETAT DU NETTOYAGE : ordonné Fantômes → Déjà vus → Doublons comme dans le menu ---
     st.divider()
     st.subheader("⚠️ État du nettoyage")
+    # Ordre : Fantômes / Déjà vus / Doublons / Action
     c5,c6,c7,c8 = st.columns(4)
     with c5:
         with st.container(border=True):
@@ -1342,31 +1442,31 @@ def page_dashboard(utz):
                 </div>""", unsafe_allow_html=True)
     with c6:
         with st.container(border=True):
-            st.markdown("#### 🔁 Doublons")
-            if len(doub) > 0:
-                pct = round(len(doub)/max(total_items,1)*100,1)
-                st.metric("Nombre", len(doub), delta=f"{pct}%")
-                st.markdown(f"""<div style="background:rgba(0,208,132,0.18); border:1px solid rgba(0,208,132,0.4); border-radius:10px; padding:8px 12px; color:#7CE0B8; font-weight:600; font-size:0.95em; margin-top:8px;">
-                    {len(doub)} doublon(s)
-                </div>""", unsafe_allow_html=True)
-            else:
-                st.metric("Nombre",0)
-                st.markdown("""<div style="background:rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:10px; padding:8px 12px; color:#7EE0D3; font-weight:600; font-size:0.95em; margin-top:8px;">
-                    ✅ Aucun doublon
-                </div>""", unsafe_allow_html=True)
-    with c7:
-        with st.container(border=True):
             st.markdown("#### 🧹 Déjà vus")
             if len(res) > 0:
                 pct = round(len(res)/max(total_items,1)*100,1)
                 st.metric("Nombre", len(res), delta=f"{pct}%")
                 st.markdown(f"""<div style="background:rgba(0,208,132,0.18); border:1px solid rgba(0,208,132,0.4); border-radius:10px; padding:8px 12px; color:#7CE0B8; font-weight:600; font-size:0.95em; margin-top:8px;">
-                    {len(res)} contenu(s) vus dans les listes
+                    {len(res)} contenu(s) vus dans vos listes
                 </div>""", unsafe_allow_html=True)
             else:
                 st.metric("Nombre",0)
                 st.markdown("""<div style="background:rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:10px; padding:8px 12px; color:#7EE0D3; font-weight:600; font-size:0.95em; margin-top:8px;">
                     ✅ Listes à jour
+                </div>""", unsafe_allow_html=True)
+    with c7:
+        with st.container(border=True):
+            st.markdown("#### 🔁 Doublons dans vos listes")
+            if len(doub) > 0:
+                pct = round(len(doub)/max(total_items,1)*100,1)
+                st.metric("Nombre", len(doub), delta=f"{pct}%")
+                st.markdown(f"""<div style="background:rgba(0,208,132,0.18); border:1px solid rgba(0,208,132,0.4); border-radius:10px; padding:8px 12px; color:#7CE0B8; font-weight:600; font-size:0.95em; margin-top:8px;">
+                    {len(doub)} doublon(s) détecté(s) dans vos listes
+                </div>""", unsafe_allow_html=True)
+            else:
+                st.metric("Nombre",0)
+                st.markdown("""<div style="background:rgba(0,163,146,0.18); border:1px solid rgba(0,163,146,0.4); border-radius:10px; padding:8px 12px; color:#7EE0D3; font-weight:600; font-size:0.95em; margin-top:8px;">
+                    ✅ Aucun doublon
                 </div>""", unsafe_allow_html=True)
     with c8:
         with st.container(border=True):
@@ -1376,7 +1476,11 @@ def page_dashboard(utz):
                 st.session_state["conf_tout"] = True
                 st.rerun()
             if st.session_state.get("conf_tout"):
-                st.warning("⚠️ Supprime tous les déjà vus et tous les fantômes.")
+                st.markdown("""
+                <div style="background:rgba(0,208,132,0.18); border:1px solid rgba(0,208,132,0.4); border-radius:12px;
+                            padding:12px; color:#7CE0B8; font-weight:600; margin-bottom:10px;">
+                ⚠️ Confirmer la suppression de tous les déjà-vus et fantômes ?
+                </div>""", unsafe_allow_html=True)
                 co,cn = st.columns(2)
                 with co:
                     if st.button("✅ Confirmer", type="primary"):
@@ -1386,7 +1490,7 @@ def page_dashboard(utz):
                         st.success(f"✅ Nettoyage terminé")
                         del st.session_state["conf_tout"]
                         time.sleep(2)
-                        for k in ["res","stats","doub","doub_det","pb","np"]:
+                        for k in ["res","stats","doub","doub_det","pb","np","_cal_items","_cal_last_key","_qr_resultats","_qr_last_key"]:
                             st.session_state.pop(k, None)
                         st.rerun()
                 with cn:
@@ -1421,7 +1525,11 @@ def page_nettoyage(utz):
                     st.session_state[conf] = True
                     st.rerun()
             else:
-                st.warning("Confirmer la suppression ?")
+                st.markdown("""
+                <div style="background:rgba(0,208,132,0.18); border:1px solid rgba(0,208,132,0.4); border-radius:12px;
+                            padding:12px; color:#7CE0B8; font-weight:600; margin-bottom:10px;">
+                ⚠️ Confirmer la suppression ?
+                </div>""", unsafe_allow_html=True)
                 co,cn = st.columns(2)
                 with co:
                     if st.button("✅ Oui"):
@@ -1468,7 +1576,11 @@ def page_doublons(utz):
                     st.session_state[conf] = True
                     st.rerun()
             else:
-                st.warning("Confirmer ?")
+                st.markdown("""
+                <div style="background:rgba(0,208,132,0.18); border:1px solid rgba(0,208,132,0.4); border-radius:12px;
+                            padding:12px; color:#7CE0B8; font-weight:600; margin-bottom:10px;">
+                ⚠️ Confirmer la suppression ?
+                </div>""", unsafe_allow_html=True)
                 co,cn = st.columns(2)
                 with co:
                     if st.button("✅ Oui"):
@@ -1535,7 +1647,11 @@ def page_fantomes(utz):
                     st.session_state[conf] = True
                     st.rerun()
             else:
-                st.warning("Confirmer ?")
+                st.markdown("""
+                <div style="background:rgba(0,208,132,0.18); border:1px solid rgba(0,208,132,0.4); border-radius:12px;
+                            padding:12px; color:#7CE0B8; font-weight:600; margin-bottom:10px;">
+                ⚠️ Confirmer la suppression des progressions sélectionnées ?
+                </div>""", unsafe_allow_html=True)
                 co,cn = st.columns(2)
                 with co:
                     if st.button("✅ Oui"):
@@ -1702,10 +1818,24 @@ def page_calendrier(utz):
                     j_restant = -1
         # On NE CHARGE PAS les posters ici (600 appels TMDB d'un coup = TROP LENT).
         # On stocke juste tmdb_id et on chargera le poster au moment de l'affichage.
+        # Construire le lien Trakt : slug prioritaire, sinon trakt_id
+        lien_trakt = None
+        if typ == "Film":
+            slug = med.get("slug") or med.get("ids",{}).get("slug")
+            tid = med.get("ids",{}).get("trakt")
+            if slug: lien_trakt = f"https://trakt.tv/movies/{slug}"
+            elif tid: lien_trakt = f"https://trakt.tv/movies/{tid}"
+        else:
+            slug = med.get("slug") or med.get("ids",{}).get("slug")
+            tid = med.get("ids",{}).get("trakt")
+            if slug: lien_trakt = f"https://trakt.tv/shows/{slug}"
+            elif tid: lien_trakt = f"https://trakt.tv/shows/{tid}"
+
         sorties.append({
             "type": typ, "titre": titre, "annee": annee, "note": note,
             "genre": genre or "Inconnu", "date": ds, "j_restant": j_restant,
-            "label": label, "tmdb": tmdb, "status": status if typ=="Série" else ""
+            "label": label, "tmdb": tmdb, "status": status if typ=="Série" else "",
+            "lien": lien_trakt
         })
 
     cf1, cf2, cf3 = st.columns(3)
@@ -1743,6 +1873,13 @@ def page_calendrier(utz):
             df = df.sort_values("titre")
 
     st.markdown(f"**{len(df)}** contenu(s) dans le calendrier.")
+
+    # Barre de recherche TITRE en memoire (aucun appel API, instantane)
+    recherche_cal = st.text_input("🔍 Rechercher un contenu", placeholder="Titre du film ou de la série...", key="cal_search")
+    if recherche_cal and not df.empty:
+        terme = recherche_cal.strip().lower()
+        df = df[df["titre"].str.lower().str.contains(terme, na=False, regex=False)]
+
     st.divider()
 
     if df.empty:
@@ -1800,7 +1937,9 @@ def page_calendrier(utz):
                         st.markdown("🎬" if r["type"]=="Film" else "📺")
                 with cd:
                     an = f" ({r['annee']})" if pd.notna(r["annee"]) else ""
-                    st.markdown(f"**{r['type']} — {r['titre']}**{an}")
+                    lien = r.get("lien")
+                    lien_html = f' <a href="{lien}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.85em;">🔗</a>' if lien else ""
+                    st.markdown(f"**{r['type']} — {r['titre']}**{an}{lien_html}", unsafe_allow_html=True)
                     note_txt = f"⭐ {r['note']:.1f}/10" if r.get("note") and r["note"] > 0 else ""
                     extra = ""
                     if r["type"] == "Série" and r.get("status"):
@@ -2415,6 +2554,19 @@ def evaluer_contenu(item, profil, maintenant_tz):
         heures = duree/60
         temps_necessaire = format_duree(heures) if heures > 0 else "inconnu"
 
+    # Construire le lien Trakt
+    lien = None
+    if item["type"] == "movie":
+        slug = med.get("slug") or med.get("ids",{}).get("slug")
+        tid = med.get("ids",{}).get("trakt")
+        if slug: lien = f"https://trakt.tv/movies/{slug}"
+        elif tid: lien = f"https://trakt.tv/movies/{tid}"
+    else:
+        slug = med.get("slug") or med.get("ids",{}).get("slug")
+        tid = med.get("ids",{}).get("trakt")
+        if slug: lien = f"https://trakt.tv/shows/{slug}"
+        elif tid: lien = f"https://trakt.tv/shows/{tid}"
+
     return {
         "type": "Film" if item["type"]=="movie" else "Série",
         "titre": titre,
@@ -2433,6 +2585,7 @@ def evaluer_contenu(item, profil, maintenant_tz):
         "votes": votes,
         "nb_episodes": nb_aired if item["type"] == "show" else 0,
         "status": status_txt,
+        "lien": lien,
     }
 
 
@@ -2530,6 +2683,14 @@ def page_quoi_regarder(utz):
         Aucun contenu à évaluer dans cette liste.
         </div>""", unsafe_allow_html=True)
         return
+
+    # Barre de recherche TITRE (en memoire, instantane, aucun appel API)
+    recherche_qr = st.text_input("🔍 Rechercher un titre", placeholder="Nom du film ou de la série...", key="qr_search")
+    if recherche_qr:
+        terme = recherche_qr.strip().lower()
+        resultats = [r for r in resultats if terme in r["titre"].lower()]
+        if not resultats:
+            st.info("Aucun contenu ne correspond à ta recherche.")
 
     # FILTRES
     tous_genres = set()
@@ -2665,7 +2826,9 @@ def page_quoi_regarder(utz):
                         st.markdown("🎬" if r["type"]=="Film" else "📺")
                 with cmain:
                     an_part = f" ({r['annee']})" if r.get('annee') else ""
-                    st.markdown(f"**{r['type']} — {r['titre']}{an_part}**")
+                    lien = r.get("lien")
+                    lien_html = f' <a href="{lien}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.9em;">🔗</a>' if lien else ""
+                    st.markdown(f"**{r['type']} — {r['titre']}{an_part}**{lien_html}", unsafe_allow_html=True)
                     note_part = f"{r['note']}" if r['note'] else "?"
                     ep_part = f" · 📺 {r['nb_episodes']} ép." if r["type"]=="Série" and r["nb_episodes"]>0 else ""
                     aj_part = f" · 📥 Ajouté il y a {r['ajout']}j" if r['ajout'] is not None else ""
@@ -2933,8 +3096,8 @@ else:
     elif p == "🧹 Nettoyage des listes": page_nettoyage(utz)
     elif p == "🔍 Recherche de doublons": page_doublons(utz)
     elif p == "🎯 Que regarder ?": page_quoi_regarder(utz)
-    elif p == "📊 Statistiques": page_stats(utz)
     elif p == "📅 Calendrier des sorties": page_calendrier(utz)
+    elif p == "📊 Statistiques": page_stats(utz)
     elif p == "🎬 Rendez-vous annuel": page_wrapped()
-    elif p == "📤 Sauvegarde": page_sauvegarde()
     elif p == "🏆 Succès": page_succes(utz)
+    elif p == "📤 Sauvegarde": page_sauvegarde()
