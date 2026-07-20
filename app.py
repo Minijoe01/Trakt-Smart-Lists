@@ -679,7 +679,8 @@ def recuperer_ratings(at):
         try:
             while True:
                 r = requests.get(f"https://api.trakt.tv/users/me/ratings/{typ}",
-                                 headers=entetes(at), params={"page": p, "limit": 100}, timeout=15)
+                                 headers=entetes(at),
+                                 params={"page": p, "limit": 100, "extended": "full"}, timeout=15)
                 if r.status_code != 200:
                     break
                 d = r.json()
@@ -693,7 +694,8 @@ def recuperer_ratings(at):
                         res[(lbl, tid)] = {"note": it.get("rating", 0) or 0,
                                            "titre": med.get("title", "?"),
                                            "annee": med.get("year"),
-                                           "tmdb": ids.get("tmdb")}
+                                           "tmdb": ids.get("tmdb"),
+                                           "genres": med.get("genres") or []}
                 p += 1
                 if p > int(r.headers.get("X-Pagination-Page-Count", 1)):
                     break
@@ -1381,7 +1383,7 @@ def entete():
                 for k in ["res","stats","doub","doub_det","pb","np","_xl_cache",
                           "_cal_items","_cal_last_key","_qr_resultats","_qr_last_key",
                           "raw_items","raw_wl","_roulette","_roulette_actuel",
-                          "ratings","_wrapped_png","_wrapped_png_annee"]:
+                          "ratings","_wrapped_png","_wrapped_png_annee","_cal_perso"]:
                     st.session_state.pop(k, None)
                 lancer_analyse(False, st.session_state["page_active"])
         with c2:
@@ -1389,7 +1391,7 @@ def entete():
                 for k in ["historique","res","stats","doub","doub_det","pb","np","infos","_xl_cache",
                           "_cal_items","_cal_last_key","_img_cache","_qr_resultats","_qr_last_key",
                           "raw_items","raw_wl","_roulette","_roulette_actuel",
-                          "ratings","_wrapped_png","_wrapped_png_annee"]:
+                          "ratings","_wrapped_png","_wrapped_png_annee","_cal_perso"]:
                     st.session_state.pop(k, None)
                 st.rerun()
         with c3:
@@ -1587,8 +1589,9 @@ def widget_sorties_semaine(utz):
 
 
 def widget_coups_de_coeur(h):
-    """TODO #6 : tes 5 films/séries les mieux notés parmi ceux que tu as vus
-    (note communauté Trakt). Données déjà en mémoire -> ZÉRO appel API."""
+    """TODO #6 V2 : tes coups de cœur = TES notes perso Trakt 9-10 en priorité
+    (plus fidèle au nom !), avec repli sur la note communauté si tu n'as rien noté.
+    Données déjà en mémoire -> ZÉRO appel API de plus."""
     best = {}
     for m in h.get("films_det", []):
         n = m.get("note") or 0
@@ -1604,12 +1607,25 @@ def widget_coups_de_coeur(h):
             if k not in best or n > best[k]["note"]:
                 best[k] = {"type": "Série", "titre": e["serie"], "annee": e.get("annee"),
                            "note": n, "id": e["id"]}
-    if not best:
+    # V2 : priorité absolue à TES notes perso 9-10 (déjà en cache via l'analyse)
+    ratings = st.session_state.get("ratings", {})
+    perso = []
+    for (lbl, tid), info in ratings.items():
+        if info.get("note", 0) >= 9:
+            perso.append({"type": lbl, "titre": info["titre"], "annee": info.get("annee"),
+                          "note": info["note"], "id": tid})
+    if not best and not perso:
         return
-    top = sorted(best.values(), key=lambda x: -x["note"])[:5]
+    if perso:
+        perso.sort(key=lambda x: (-x["note"], x["titre"]))
+        top = perso[:5]
+        source_txt = "selon TES notes Trakt (9-10)."
+    else:
+        top = sorted(best.values(), key=lambda x: -x["note"])[:5]
+        source_txt = "selon la communauté Trakt (9+ /10), car tu n'as pas encore noté de contenu 9-10."
     st.divider()
     st.markdown("### ⭐ Mes coups de cœur")
-    st.caption("Les contenus que tu as déjà vus et qui sont les mieux notés par la communauté Trakt (9+ /10). De bons candidats à revoir !")
+    st.caption(f"Tes plus belles découvertes, {source_txt} De bons candidats à revoir !")
     with st.container(border=True):
         cols = st.columns(len(top))
         for i, c in enumerate(top):
@@ -1657,6 +1673,45 @@ def widget_bizarreries(h):
                 sens = "🙃 Tu as boudé ce que le public a adoré"
             st.markdown(f"{ic} **{c['titre']}**{an} — Toi **{c['note']}/10** · Public **{c['pub']:.1f}/10** · écart **{c['ecart']:+.1f}**")
             st.caption(sens)
+
+
+def widget_rewatch_radar():
+    """🔁 Films vus UNE seule fois il y a 3+ ans, adorés du public (≥8) : à revoir.
+    100% calculé sur l'historique déjà chargé -> ZÉRO appel API."""
+    h = st.session_state.get("historique")
+    if not h:
+        return
+    notes = {}
+    for m in h.get("films_det", []):
+        notes[m["id"]] = m.get("note") or 0
+    mtj = datetime.now(pytz.utc)
+    cands = []
+    for tid, f in (h.get("films") or {}).items():
+        if f.get("vues", 0) != 1:
+            continue
+        n = notes.get(tid, 0)
+        if n < 8:
+            continue
+        try:
+            d = datetime.fromisoformat(f["dernier"].replace("Z", "+00:00"))
+        except Exception:
+            continue
+        jours = (mtj - d).days
+        if jours < 1095:
+            continue
+        cands.append({"titre": f["titre"], "annee": f.get("annee"), "note": n,
+                      "ans": jours // 365})
+    if not cands:
+        return
+    cands.sort(key=lambda x: (-x["note"], -x["ans"]))
+    top = cands[:3]
+    st.divider()
+    st.markdown("### 🔁 Rewatch radar")
+    st.caption("Vus une seule fois il y a 3 ans ou plus, et très bien notés — un soir nostalgie ?")
+    with st.container(border=True):
+        for c in top:
+            an = f" ({c['annee']})" if c.get("annee") else ""
+            st.markdown(f"🎬 **{c['titre']}**{an} — ⭐ **{c['note']:.1f}**/10 · vu il y a **{c['ans']} an{'s' if c['ans'] > 1 else ''}**")
 
 
 def widget_plus_ancien_watchlist(utz):
@@ -1710,6 +1765,27 @@ def page_dashboard(utz):
     c2.metric("📺 Séries", h["nb_series"])
     c3.metric("🎞️ Épisodes", h["nb_ep"])
     c4.metric("⏱️ Temps total", format_duree(th))
+
+    # --- 📈 MINI DIGEST HEBDO : calculé sur l'historique déjà chargé (0 appel API) ---
+    _il_y_a_7j = datetime.now(utz) - timedelta(days=7)
+    _h_films = _h_eps = 0
+    _h_min = 0.0
+    for _m in h["films_det"]:
+        try:
+            if datetime.fromisoformat(_m["date"].replace("Z", "+00:00")) >= _il_y_a_7j:
+                _h_films += 1
+                _h_min += _m.get("duree", 0) or 0
+        except Exception:
+            pass
+    for _e in h["ep_det"]:
+        try:
+            if datetime.fromisoformat(_e["date"].replace("Z", "+00:00")) >= _il_y_a_7j:
+                _h_eps += 1
+                _h_min += _e.get("duree", 0) or 0
+        except Exception:
+            pass
+    if _h_films or _h_eps:
+        st.markdown(f"🍿 **Cette semaine** : { _h_eps } épisode(s), { _h_films } film(s) — soit **{format_duree(_h_min/60)}** de visionnage.")
 
     # --- 1. EN COURS DE LECTURE direct sur le dashboard (carte style fantôme, liseré lime) ---
     st.divider()
@@ -1801,7 +1877,7 @@ def page_dashboard(utz):
                         time.sleep(2)
                         for k in ["res","stats","doub","doub_det","pb","np","_cal_items","_cal_last_key","_qr_resultats","_qr_last_key",
                                   "raw_items","raw_wl","_roulette","_roulette_actuel",
-                                  "ratings","_wrapped_png","_wrapped_png_annee"]:
+                                  "ratings","_wrapped_png","_wrapped_png_annee","_cal_perso"]:
                             st.session_state.pop(k, None)
                         st.rerun()
                 with cn:
@@ -1816,6 +1892,7 @@ def page_dashboard(utz):
     widget_plus_ancien_watchlist(utz)
     widget_coups_de_coeur(h)
     widget_bizarreries(h)
+    widget_rewatch_radar()
 
 def page_nettoyage(utz):
     if bloc_lancement(): return
@@ -1924,6 +2001,19 @@ def page_fantomes(utz):
         del st.session_state[msg]
     st.subheader("👻 Progression Fantôme")
     st.caption("Supprime les entrées bloquées dans 'Continuer à regarder'.")
+
+    # ▶️ "Tu peux finir ça ce soir" : fantômes triés par temps restant (0 appel API)
+    _finissables = []
+    for _it in pb:
+        if _it.get("duree", 0) > 0 and 0 < _it["prog"] < 95:
+            _reste = _it["duree"] * (100 - _it["prog"]) / 100
+            _finissables.append((_reste, _it))
+    if _finissables:
+        _finissables.sort(key=lambda x: x[0])
+        with st.container(border=True):
+            st.markdown("⚡ **Tu peux finir ça ce soir** (du plus rapide au plus long) :")
+            for _reste, _it in _finissables[:3]:
+                st.markdown(f"▶️ **{_it['titre']}** — il te reste **{format_minutes(int(round(_reste)))}** ({_it['prog']}% vus)")
     st.divider()
     if not pb:
         st.markdown("""
@@ -1995,6 +2085,43 @@ def page_calendrier(utz):
     st.subheader("📅 Calendrier des sorties")
     st.caption("Les prochaines sorties attendues des films et séries présents dans tes listes.")
     at = st.session_state["access_token"]
+
+    # 🗓️ CALENDRIER PERSO TRAKT : les vraies dates des prochains épisodes de TES séries.
+    # UN appel, chargé SEULEMENT si tu ouvres le bloc (zéro coût sinon), puis mis en cache.
+    with st.expander("🗓️ Mon calendrier perso — les épisodes de MES séries (7 prochains jours)"):
+        if "_cal_perso" not in st.session_state:
+            if st.button("📥 Charger (1 appel Trakt)", key="btn_cal_perso"):
+                with st.spinner("Récupération de ton calendrier perso..."):
+                    try:
+                        _r = requests.get("https://api.trakt.tv/calendars/my/shows",
+                                          headers=entetes(at), timeout=15)
+                        st.session_state["_cal_perso"] = _r.json() if _r.status_code == 200 else []
+                    except Exception:
+                        st.session_state["_cal_perso"] = []
+                st.rerun()
+        eps_perso = st.session_state.get("_cal_perso", [])
+        if eps_perso:
+            _jours_fr = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
+            _par_jour = {}
+            for _e in eps_perso:
+                try:
+                    _d = datetime.fromisoformat(_e["first_aired"].replace("Z", "+00:00")).astimezone(utz)
+                except Exception:
+                    continue
+                _par_jour.setdefault(_d.date(), []).append((_d, _e))
+            if not _par_jour:
+                st.markdown("Rien de prévu dans les 7 prochains jours. 🌴")
+            for _jour in sorted(_par_jour):
+                _dt = datetime.combine(_jour, datetime.min.time())
+                st.markdown(f"**{_jours_fr[_dt.weekday()]} {_jour.strftime('%d/%m')}**")
+                for _d, _e in _par_jour[_jour]:
+                    _sh = _e.get("show", {})
+                    _ep = _e.get("episode", {})
+                    _nom_ep = f" — « {_ep['title']} »" if _ep.get("title") else ""
+                    try:
+                        st.markdown(f"• **{_sh.get('title','?')}** — S{_ep.get('season',0):02d}E{_ep.get('number',0):02d}{_nom_ep} · 🕒 {_d.strftime('%H:%M')}")
+                    except Exception:
+                        continue
 
     # Sélecteur de liste (comme dans "Que regarder ?")
     listes_dispo = [("🌟 Toutes les listes confondues", "__ALL__"),
@@ -2706,7 +2833,15 @@ def construire_profil(histo, utz):
         m = max(d.values()) if d else 1
         return {k: v/m*100 for k,v in d.items()}
     note_moy_genre = {k: sum(v)/len(v) for k,v in notes_par_genre.items() if v}
+    # Signal de TES NOTES PERSO Trakt par genre (moyenne des notes que TU as données)
+    notes_perso_par_genre = {}
+    for info in st.session_state.get("ratings", {}).values():
+        for g in info.get("genres") or []:
+            if g and g != "Inconnu" and info.get("note", 0) > 0:
+                notes_perso_par_genre.setdefault(g, []).append(info["note"])
+    genres_perso = {k: sum(v)/len(v) for k, v in notes_perso_par_genre.items() if v}
     return {
+        "genres_perso": genres_perso,
         "genres": normaliser(genres_score),
         "reseaux": normaliser(reseaux_score),
         "decennies": normaliser(decennies_score),
@@ -2772,6 +2907,19 @@ def evaluer_contenu(item, profil, maintenant_tz):
         raisons.append("Très populaire")
     elif votes >= 10000:
         raisons.append("Apprécié du public")
+
+    # 2b. Colle-t-il aux genres que TU notes haut ? (bonus +8 / malus -6)
+    genres_perso = profil.get("genres_perso", {})
+    if genres and genres_perso:
+        notes_g = [genres_perso[g] for g in genres if g in genres_perso]
+        if notes_g:
+            moy_perso = sum(notes_g) / len(notes_g)
+            if moy_perso >= 8:
+                score += 8
+                raisons.append("Genre que TU notes haut (d'après tes notes Trakt)")
+            elif moy_perso <= 5:
+                score -= 6
+                points_noirs.append("Genre que tu notes bas (d'après tes notes Trakt)")
 
     # 3. Recence / classiques
     if annee:
@@ -2968,6 +3116,24 @@ def page_quoi_regarder(utz):
                         items = []
                     else:
                         items = recuperer_contenu_liste(at, l_id)
+
+                # DéDOUBLONNAGE : un même contenu présent dans plusieurs listes ne doit
+                # être proposé QU'UNE FOIS (comme sur la page Calendrier). On garde
+                # l'entrée dont l'ajout en liste est le plus récent.
+                _by_id = {}
+                for it in items:
+                    try:
+                        if it["type"] == "movie":
+                            _cle = ("movie", it["movie"]["ids"]["trakt"])
+                        elif it["type"] == "show":
+                            _cle = ("show", it["show"]["ids"]["trakt"])
+                        else:
+                            continue
+                        if _cle not in _by_id or (it.get("_listed_at") or "") > (_by_id[_cle].get("_listed_at") or ""):
+                            _by_id[_cle] = it
+                    except Exception:
+                        continue
+                items = list(_by_id.values())
 
                 deja_vus_tids = set()
                 for r in st.session_state.get("res", []):
@@ -3232,9 +3398,18 @@ _P_BORDER = (18, 90, 84)
 def _png_police(taille, gras=False):
     """Police DejaVu si dispo (Streamlit Cloud l'a), sinon fallback intégré à Pillow."""
     from PIL import ImageFont
+    import os
+    nom = "DejaVuSans-Bold.ttf" if gras else "DejaVuSans.ttf"
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))  # dossier d'app.py (et de fonts/)
+    except NameError:
+        base = os.getcwd()
+
     chemins = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if gras else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "DejaVuSans-Bold.ttf" if gras else "DejaVuSans.ttf",
+        os.path.join(base, "fonts", nom),   # polices EMBARQUÉES dans le repo : accents garantis partout
+        os.path.join("fonts", nom),
+        "/usr/share/fonts/truetype/dejavu/" + nom,
+        nom,
     ]
     for c in chemins:
         try:
@@ -3297,24 +3472,25 @@ def generer_image_wrapped(d):
     M = 70
     col_w = W_PNG - 2 * M
 
-    y = 60
+    y = 55
     _png_centre(dr, "T R A K T   S M A R T   L I S T S", y, f_xs, _P_MUTED)
-    y += 64
+    y += 58
     _png_centre(dr, f"MON ANNÉE {d['annee']}", y, f_l_b, _P_LIME)
 
     # Hero : temps total (taille auto-ajustée)
-    y += 130
+    y += 115
     total_txt = str(d["total"])
     f_hero = _png_font_ajuste(dr, total_txt, col_w, 260, 90)
     _png_centre(dr, total_txt, y, f_hero, _P_TEXT)
-    y += 270 if getattr(f_hero, "size", 260) >= 130 else 150
+    # Espacement proportionnel à la hauteur réelle du texte (évite tout chevauchement)
+    y += int(getattr(f_hero, "size", 200) * 0.80) + 36
     _png_centre(dr, "de films & séries regardés", y, f_s, _P_MUTED)
 
     # 3 stat cards
-    y += 90
+    y += 56
     gap = 24
     cw = (col_w - 2 * gap) // 3
-    ch = 150
+    ch = 140
     for i, (lbl, val) in enumerate([("FILMS", d["films"]), ("SÉRIES", d["series"]), ("ÉPISODES", d["episodes"])]):
         x0 = M + i * (cw + gap)
         dr.rounded_rectangle([x0, y, x0 + cw, y + ch], radius=24, fill=_P_CARD, outline=_P_BORDER, width=2)
@@ -3325,14 +3501,14 @@ def generer_image_wrapped(d):
         dr.text((cx - tw / 2, y + 58), str(val), font=f_l_b, fill=_P_LIME)
 
     # Tops 2 colonnes
-    y += ch + 60
+    y += ch + 48
     col2 = (col_w - gap) // 2
-    bloc_h = 392
+    bloc_h = 380
 
     def bloc_top(x0, titre, items, footer):
         dr.rounded_rectangle([x0, y, x0 + col2, y + bloc_h], radius=24, fill=_P_CARD, outline=_P_BORDER, width=2)
         dr.text((x0 + 30, y + 24), titre, font=f_m_b, fill=_P_GREEN)
-        yy = y + 92
+        yy = y + 88
         for i, (t, n) in enumerate(items[:5], 1):
             label = f"{i}. "
             phrase = f"{n}×"
@@ -3342,15 +3518,16 @@ def generer_image_wrapped(d):
             dr.text((x0 + 30 + lw, yy), t_aff, font=f_s, fill=_P_TEXT)
             pw = dr.textlength(phrase, font=f_s)
             dr.text((x0 + col2 - 30 - pw, yy), phrase, font=f_s, fill=_P_MUTED)
-            yy += 46
-        dr.rectangle([x0 + 30, y + bloc_h - 58, x0 + col2 - 30, y + bloc_h - 56], fill=_P_BORDER)
-        dr.text((x0 + 30, y + bloc_h - 46), footer, font=f_xs, fill=_P_MUTED)
+            yy += 45
+        dr.rectangle([x0 + 30, y + bloc_h - 56, x0 + col2 - 30, y + bloc_h - 54], fill=_P_BORDER)
+        dr.text((x0 + 30, y + bloc_h - 42), footer, font=f_xs, fill=_P_MUTED)
 
     bloc_top(M, "TOP FILMS", d["top_films"] or [("—", 0)], f"note moyenne {d['note_moy']}/10")
     bloc_top(M + col2 + gap, "TOP SÉRIES", d["top_series"] or [("—", 0)], f"record : {d['record_txt']}")
 
-    # Genres
-    y += bloc_h + 44
+    # Genres (clampé pour toujours rester au-dessus du pied de page)
+    y += bloc_h + 40
+    y = min(y, H_PNG - 176)
     genres_txt = "  ·  ".join(g.upper() for g, _ in (d["top_genres"] or [])[:3]) or "CINÉMA & SÉRIES"
     f_genres = _png_font_ajuste(dr, genres_txt, col_w, 44, 28)
     _png_centre(dr, genres_txt, y, f_genres, _P_LIME)
