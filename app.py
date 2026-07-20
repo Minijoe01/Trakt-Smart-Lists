@@ -1632,7 +1632,7 @@ def widget_coups_de_coeur(h):
             ic = "🎬" if c["type"] == "Film" else "📺"
             an = f" ({c['annee']})" if c.get("annee") else ""
             with cols[i]:
-                st.markdown(f"{ic} **{c['titre']}**{an}")
+                st.markdown(f"{ic} [**{c['titre']}**{an}](https://trakt.tv/{'movies' if c['type'] == 'Film' else 'shows'}/{c['id']})")
                 st.caption(f"⭐ **{c['note']:.1f}**/10")
 
 
@@ -1655,14 +1655,14 @@ def widget_bizarreries(h):
             continue
         d = info["note"] - npub
         if abs(d) >= 2.0:  # écart significatif seulement
-            ecarts.append({**info, "type": k[0], "pub": npub, "ecart": d})
+            ecarts.append({**info, "type": k[0], "pub": npub, "ecart": d, "tid": k[1]})
     if not ecarts:
         return
     ecarts.sort(key=lambda x: -abs(x["ecart"]))
     top = ecarts[:5]
     st.divider()
-    st.markdown("### 🃏 Mes bizarreries")
-    st.caption("Là où ton avis s'écarte le plus de celui du public : TA note Trakt perso vs la note communauté.")
+    st.markdown("### 🧭 À contre-courant")
+    st.caption("Tes goûts qui nagent à contre-courant de la foule : là où TA note Trakt s'écarte le plus de la note du public.")
     with st.container(border=True):
         for c in top:
             ic = "🎬" if c["type"] == "Film" else "📺"
@@ -1671,7 +1671,7 @@ def widget_bizarreries(h):
                 sens = "💎 Tu as adoré ce que le public a boudé"
             else:
                 sens = "🙃 Tu as boudé ce que le public a adoré"
-            st.markdown(f"{ic} **{c['titre']}**{an} — Toi **{c['note']}/10** · Public **{c['pub']:.1f}/10** · écart **{c['ecart']:+.1f}**")
+            st.markdown(f"{ic} [**{c['titre']}**{an}](https://trakt.tv/{'movies' if c['type'] == 'Film' else 'shows'}/{c['tid']}) — Toi **{c['note']}/10** · Public **{c['pub']:.1f}/10** · écart **{c['ecart']:+.1f}**")
             st.caption(sens)
 
 
@@ -1700,7 +1700,7 @@ def widget_rewatch_radar():
         if jours < 1095:
             continue
         cands.append({"titre": f["titre"], "annee": f.get("annee"), "note": n,
-                      "ans": jours // 365})
+                      "ans": jours // 365, "tid": tid})
     if not cands:
         return
     cands.sort(key=lambda x: (-x["note"], -x["ans"]))
@@ -1711,7 +1711,7 @@ def widget_rewatch_radar():
     with st.container(border=True):
         for c in top:
             an = f" ({c['annee']})" if c.get("annee") else ""
-            st.markdown(f"🎬 **{c['titre']}**{an} — ⭐ **{c['note']:.1f}**/10 · vu il y a **{c['ans']} an{'s' if c['ans'] > 1 else ''}**")
+            st.markdown(f"🎬 [**{c['titre']}**{an}](https://trakt.tv/movies/{c['tid']}) — ⭐ **{c['note']:.1f}**/10 · vu il y a **{c['ans']} an{'s' if c['ans'] > 1 else ''}**")
 
 
 def widget_plus_ancien_watchlist(utz):
@@ -3666,7 +3666,7 @@ def page_wrapped():
     # --- 🖼️ TODO #4 : IMAGE WRAPPED PARTAGEABLE ---
     st.divider()
     st.markdown("### 🖼️ Ton image Wrapped à partager")
-    st.caption("Un récap visuel de ton année, façon Spotify Wrapped, prêt à partager. Généré uniquement au clic : aucun ralentissement de l'app.")
+    st.caption("Un récap visuel de ton année, façon Spotify Wrapped, prêt à partager sur Insta, X ou Reddit ✨")
     if st.button("✨ Générer mon image Wrapped", use_container_width=True, key="btn_wrapped_png"):
         with st.spinner("Création de ton image..."):
             data_img = {
