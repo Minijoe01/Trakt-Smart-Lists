@@ -669,6 +669,38 @@ def recuperer_lecture(at):
     except Exception:
         return None
 
+def recuperer_ratings(at):
+    """Notes PERSONNELLES de l'utilisateur (films + séries).
+    2 appels paginés, faits UNE FOIS pendant l'analyse puis mis en cache en session.
+    Retourne {('Film'|'Série', trakt_id): {'note', 'titre', 'annee', 'tmdb'}}"""
+    res = {}
+    for typ, lbl, cle_med in (("movies", "Film", "movie"), ("shows", "Série", "show")):
+        p = 1
+        try:
+            while True:
+                r = requests.get(f"https://api.trakt.tv/users/me/ratings/{typ}",
+                                 headers=entetes(at), params={"page": p, "limit": 100}, timeout=15)
+                if r.status_code != 200:
+                    break
+                d = r.json()
+                if not d:
+                    break
+                for it in d:
+                    med = it.get(cle_med) or {}
+                    ids = med.get("ids", {}) or {}
+                    tid = ids.get("trakt")
+                    if tid:
+                        res[(lbl, tid)] = {"note": it.get("rating", 0) or 0,
+                                           "titre": med.get("title", "?"),
+                                           "annee": med.get("year"),
+                                           "tmdb": ids.get("tmdb")}
+                p += 1
+                if p > int(r.headers.get("X-Pagination-Page-Count", 1)):
+                    break
+        except Exception:
+            pass
+    return res
+
 def ct(items):
     return sum(1 for i in items if i["type"]=="movie"), sum(1 for i in items if i["type"]=="show")
 
@@ -1092,12 +1124,14 @@ def lancer_analyse(rafraichir=False, page_suivante="🏠 Tableau de bord"):
         res, stats, doub, doub_det, raw_items, raw_wl = analyser(st.session_state["access_token"], st.session_state["historique"], barre)
         pb = recuperer_playback(st.session_state["access_token"], barre)
         np = recuperer_lecture(st.session_state["access_token"])
+        ratings = recuperer_ratings(st.session_state["access_token"])
         st.session_state["res"] = res
         st.session_state["stats"] = stats
         st.session_state["doub"] = doub
         st.session_state["doub_det"] = doub_det
         st.session_state["raw_items"] = raw_items  # items bruts de TOUTES les listes (dédupliqués)
         st.session_state["raw_wl"] = raw_wl        # items bruts de la liste de suivi (accès listed_at)
+        st.session_state["ratings"] = ratings      # TES notes perso Trakt (films + séries)
         st.session_state["pb"] = pb
         st.session_state["np"] = np
         st.session_state["page_active"] = page_suivante
@@ -1346,14 +1380,16 @@ def entete():
             if st.button("🔄 Analyse rapide", use_container_width=True):
                 for k in ["res","stats","doub","doub_det","pb","np","_xl_cache",
                           "_cal_items","_cal_last_key","_qr_resultats","_qr_last_key",
-                          "raw_items","raw_wl","_roulette","_roulette_actuel"]:
+                          "raw_items","raw_wl","_roulette","_roulette_actuel",
+                          "ratings","_wrapped_png","_wrapped_png_annee"]:
                     st.session_state.pop(k, None)
                 lancer_analyse(False, st.session_state["page_active"])
         with c2:
             if st.button("🔃 Rafraîchir tout", use_container_width=True):
                 for k in ["historique","res","stats","doub","doub_det","pb","np","infos","_xl_cache",
                           "_cal_items","_cal_last_key","_img_cache","_qr_resultats","_qr_last_key",
-                          "raw_items","raw_wl","_roulette","_roulette_actuel"]:
+                          "raw_items","raw_wl","_roulette","_roulette_actuel",
+                          "ratings","_wrapped_png","_wrapped_png_annee"]:
                     st.session_state.pop(k, None)
                 st.rerun()
         with c3:
@@ -1584,6 +1620,45 @@ def widget_coups_de_coeur(h):
                 st.caption(f"⭐ **{c['note']:.1f}**/10")
 
 
+def widget_bizarreries(h):
+    """Les contenus où TA note perso s'écarte le plus de celle du public.
+    Utilise 'ratings' (fetché 1 fois pendant l'analyse) + l'historique déjà chargé."""
+    ratings = st.session_state.get("ratings", {})
+    if not ratings:
+        return
+    # Notes publiques (communauté) connues via l'historique déjà chargé : 0 appel API
+    pub = {}
+    for m in h.get("films_det", []):
+        pub[("Film", m["id"])] = m.get("note") or 0
+    for e in h.get("ep_det", []):
+        pub[("Série", e["id"])] = e.get("note") or 0
+    ecarts = []
+    for k, info in ratings.items():
+        npub = pub.get(k, 0)
+        if npub <= 0 or info["note"] <= 0:
+            continue
+        d = info["note"] - npub
+        if abs(d) >= 2.0:  # écart significatif seulement
+            ecarts.append({**info, "type": k[0], "pub": npub, "ecart": d})
+    if not ecarts:
+        return
+    ecarts.sort(key=lambda x: -abs(x["ecart"]))
+    top = ecarts[:5]
+    st.divider()
+    st.markdown("### 🃏 Mes bizarreries")
+    st.caption("Là où ton avis s'écarte le plus de celui du public : TA note Trakt perso vs la note communauté.")
+    with st.container(border=True):
+        for c in top:
+            ic = "🎬" if c["type"] == "Film" else "📺"
+            an = f" ({c['annee']})" if c.get("annee") else ""
+            if c["ecart"] > 0:
+                sens = "💎 Tu as adoré ce que le public a boudé"
+            else:
+                sens = "🙃 Tu as boudé ce que le public a adoré"
+            st.markdown(f"{ic} **{c['titre']}**{an} — Toi **{c['note']}/10** · Public **{c['pub']:.1f}/10** · écart **{c['ecart']:+.1f}**")
+            st.caption(sens)
+
+
 def widget_plus_ancien_watchlist(utz):
     """TODO #5 : le contenu ajouté depuis le plus longtemps à ta liste de suivi.
     Calculé sur les items déjà chargés -> ZÉRO appel API."""
@@ -1655,12 +1730,6 @@ def page_dashboard(utz):
         except Exception:
             pass
 
-    # --- Widgets découverte : sorties de la semaine + coups de cœur + plus vieux item ---
-    # (utilisent uniquement les données déjà chargées par l'analyse : ZÉRO appel API)
-    widget_sorties_semaine(utz)
-    widget_coups_de_coeur(h)
-    widget_plus_ancien_watchlist(utz)
-
     # --- ETAT DU NETTOYAGE : ordonné Fantômes → Déjà vus → Doublons comme dans le menu ---
     st.divider()
     st.subheader("⚠️ État du nettoyage")
@@ -1731,13 +1800,22 @@ def page_dashboard(utz):
                         del st.session_state["conf_tout"]
                         time.sleep(2)
                         for k in ["res","stats","doub","doub_det","pb","np","_cal_items","_cal_last_key","_qr_resultats","_qr_last_key",
-                                  "raw_items","raw_wl","_roulette","_roulette_actuel"]:
+                                  "raw_items","raw_wl","_roulette","_roulette_actuel",
+                                  "ratings","_wrapped_png","_wrapped_png_annee"]:
                             st.session_state.pop(k, None)
                         st.rerun()
                 with cn:
                     if st.button("❌ Annuler"):
                         del st.session_state["conf_tout"]
                         st.rerun()
+
+    # --- DÉCOUVERTE (en bas du dashboard, après l'action) ---
+    # Ordre voulu : 1. lecture en cours  2. état du nettoyage  3. coups de cœur & cie
+    # Tous ces widgets utilisent les données DÉJÀ chargées par l'analyse : ZÉRO appel API.
+    widget_sorties_semaine(utz)
+    widget_plus_ancien_watchlist(utz)
+    widget_coups_de_coeur(h)
+    widget_bizarreries(h)
 
 def page_nettoyage(utz):
     if bloc_lancement(): return
@@ -2926,57 +3004,6 @@ def page_quoi_regarder(utz):
         </div>""", unsafe_allow_html=True)
         return
 
-    # TODO #2 : 🎲 Roulette — pioche au hasard dans les résultats DÉJÀ chargés (aucun appel API)
-    col_roul, _ = st.columns([0.4, 0.6])
-    with col_roul:
-        if st.button("🎲 Roulette — Je ne sais pas quoi regarder", use_container_width=True, key="btn_roulette"):
-            pool = [r for r in resultats if r["score"] >= 70 and not r.get("pas_pour_moi")]
-            if not pool:  # si rien a 70+, on prend le top 10 dispo
-                pool = sorted(resultats, key=lambda x: -x["score"])[:10]
-            pool = [r for r in pool if r.get("titre") != st.session_state.get("_roulette_actuel")]
-            if pool:
-                choix = random.choice(pool)
-                st.session_state["_roulette"] = choix
-                st.session_state["_roulette_actuel"] = choix["titre"]
-                st.rerun()
-            elif resultats:
-                choix = random.choice(resultats)
-                st.session_state["_roulette"] = choix
-                st.session_state["_roulette_actuel"] = choix["titre"]
-                st.rerun()
-
-    roul = st.session_state.get("_roulette")
-    if roul:
-        with st.container(border=True):
-            ci, cm = st.columns([0.10, 0.90])
-            with ci:
-                tmdb_r = roul.get("tmdb")
-                img_r = image_tmdb(tmdb_r, "movie" if roul["type"] == "Film" else "tv") if tmdb_r else None
-                if img_r:
-                    st.image(img_r, use_container_width=True)
-                else:
-                    st.markdown("🎬" if roul["type"] == "Film" else "📺")
-            with cm:
-                an_r = f" ({roul['annee']})" if roul.get("annee") else ""
-                lien_r = roul.get("lien")
-                lien_html_r = f' <a href="{lien_r}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.9em;">🔗</a>' if lien_r else ""
-                st.markdown(f"🎲 **Le hasard a choisi : {roul['type']} — {roul['titre']}{an_r}**{lien_html_r}", unsafe_allow_html=True)
-                note_r = f"{roul['note']}/10" if roul.get("note") else "Note inconnue"
-                ep_r = f" · 📺 {roul['nb_episodes']} ép." if roul["type"] == "Série" and roul.get("nb_episodes", 0) > 0 else ""
-                st.caption(f"⭐ {note_r} · ⏱️ {roul['temps']} · 🎭 {roul['genres']}{ep_r} · Score {int(roul['score'])}/100")
-                st.progress(min(int(roul["score"]), 100) / 100)
-                if roul.get("raisons"):
-                    st.markdown(" · ".join(f":green[✅ {x}]" for x in roul["raisons"]))
-                if st.button("🎲 Une autre ?", key="btn_roulette_next"):
-                    pool = [r for r in resultats if r["score"] >= 70 and not r.get("pas_pour_moi") and r["titre"] != roul["titre"]]
-                    if not pool:
-                        pool = sorted([r for r in resultats if r["titre"] != roul["titre"]], key=lambda x: -x["score"])[:10]
-                    if pool:
-                        choix = random.choice(pool)
-                        st.session_state["_roulette"] = choix
-                        st.session_state["_roulette_actuel"] = choix["titre"]
-                    st.rerun()
-
     # Barre de recherche TITRE (en memoire, instantane, aucun appel API)
     recherche_qr = st.text_input("🔍 Rechercher un titre", placeholder="Nom du film ou de la série...", key="qr_search")
     if recherche_qr:
@@ -3058,6 +3085,54 @@ def page_quoi_regarder(utz):
 
     st.markdown(f"**{len(filtrés)}** contenus évalués.")
 
+    # TODO #2 : 🎲 Roulette — pioche dans les contenus FILTRÉS (respecte type, genre, note, durée, statut + recherche)
+    col_roul, col_info = st.columns([0.4, 0.6])
+    with col_roul:
+        if st.button("🎲 Roulette — Je ne sais pas quoi regarder", use_container_width=True, key="btn_roulette"):
+            pool = [r for r in filtrés if r["score"] >= 70 and not r.get("pas_pour_moi") and r["titre"] != st.session_state.get("_roulette_actuel")]
+            if not pool:  # si les filtres sont trop restrictifs, on prend le top dispo
+                pool = sorted([r for r in filtrés if r["titre"] != st.session_state.get("_roulette_actuel")], key=lambda x: -x["score"])[:10]
+            if pool:
+                choix = random.choice(pool)
+                st.session_state["_roulette"] = choix
+                st.session_state["_roulette_actuel"] = choix["titre"]
+                st.rerun()
+    with col_info:
+        st.caption("🎲 La roulette pioche dans **tes filtres actifs** (type, genre, note, durée, statut).")
+
+    roul = st.session_state.get("_roulette")
+    if roul:
+        with st.container(border=True):
+            ci, cm = st.columns([0.10, 0.90])
+            with ci:
+                tmdb_r = roul.get("tmdb")
+                img_r = image_tmdb(tmdb_r, "movie" if roul["type"] == "Film" else "tv") if tmdb_r else None
+                if img_r:
+                    st.image(img_r, use_container_width=True)
+                else:
+                    st.markdown("🎬" if roul["type"] == "Film" else "📺")
+            with cm:
+                an_r = f" ({roul['annee']})" if roul.get("annee") else ""
+                lien_r = roul.get("lien")
+                lien_html_r = f' <a href="{lien_r}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.9em;">🔗</a>' if lien_r else ""
+                st.markdown(f"🎲 **Le hasard a choisi : {roul['type']} — {roul['titre']}{an_r}**{lien_html_r}", unsafe_allow_html=True)
+                note_r = f"{roul['note']}/10" if roul.get("note") else "Note inconnue"
+                ep_r = f" · 📺 {roul['nb_episodes']} ép." if roul["type"] == "Série" and roul.get("nb_episodes", 0) > 0 else ""
+                st.caption(f"⭐ {note_r} · ⏱️ {roul['temps']} · 🎭 {roul['genres']}{ep_r} · Score {int(roul['score'])}/100")
+                st.progress(min(int(roul["score"]), 100) / 100)
+                if roul.get("raisons"):
+                    st.markdown(" · ".join(f":green[✅ {x}]" for x in roul["raisons"]))
+                if st.button("🎲 Une autre ?", key="btn_roulette_next"):
+                    pool = [r for r in filtrés if r["score"] >= 70 and not r.get("pas_pour_moi") and r["titre"] != roul["titre"]]
+                    if not pool:
+                        pool = sorted([r for r in filtrés if r["titre"] != roul["titre"]], key=lambda x: -x["score"])[:10]
+                    if pool:
+                        choix = random.choice(pool)
+                        st.session_state["_roulette"] = choix
+                        st.session_state["_roulette_actuel"] = choix["titre"]
+                    st.rerun()
+
+
     # Tris : CHAQUE TRIE AFFICHE EXACTEMENT CE QU'IL DIT, PAS DE SOUS-SECTIONS MELEES
     if f_tri == "✨ Pour moi (recommandé)":
         # Dans ce mode : 3 sous-sections
@@ -3136,6 +3211,157 @@ def page_quoi_regarder(utz):
                         st.markdown(" · ".join(tag_parts))
                 with cscore:
                     st.metric("Score", f"{int(r['score'])}/100", label_visibility="collapsed")
+
+
+# ==================================================
+# IMAGE WRAPPED PARTAGEABLE (PNG) — Pillow
+# ==================================================
+
+W_PNG, H_PNG = 1080, 1350
+
+_P_GREEN  = (0, 163, 146)
+_P_LIME   = (206, 220, 0)
+_P_TEXT   = (240, 250, 248)
+_P_MUTED  = (157, 197, 191)
+_P_BG_TOP = (0, 107, 98)
+_P_BG_BOT = (1, 23, 21)
+_P_CARD   = (8, 55, 50)
+_P_BORDER = (18, 90, 84)
+
+
+def _png_police(taille, gras=False):
+    """Police DejaVu si dispo (Streamlit Cloud l'a), sinon fallback intégré à Pillow."""
+    from PIL import ImageFont
+    chemins = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if gras else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "DejaVuSans-Bold.ttf" if gras else "DejaVuSans.ttf",
+    ]
+    for c in chemins:
+        try:
+            return ImageFont.truetype(c, taille)
+        except Exception:
+            pass
+    try:
+        return ImageFont.load_default(size=taille)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _png_centre(dr, txt, y, font, fill, w=W_PNG):
+    tw = dr.textlength(txt, font=font)
+    dr.text(((w - tw) / 2, y), txt, font=font, fill=fill)
+
+
+def _png_tronque(dr, txt, font, max_w):
+    if dr.textlength(txt, font=font) <= max_w:
+        return txt
+    while txt and dr.textlength(txt + "…", font=font) > max_w:
+        txt = txt[:-1]
+    return txt + "…"
+
+
+def _png_font_ajuste(dr, txt, max_w, taille_max, taille_min=40, gras=True):
+    """Réduit la taille de police jusqu'à ce que le texte rentre dans max_w."""
+    t = taille_max
+    while t > taille_min:
+        f = _png_police(t, gras)
+        if dr.textlength(txt, font=f) <= max_w:
+            return f
+        t -= 10
+    return _png_police(taille_min, gras)
+
+
+def generer_image_wrapped(d):
+    """TODO #4 : image PNG 1080x1350 style Spotify Wrapped, aux couleurs de l'app.
+    Générée UNE SEULE FOIS au clic, sans aucun appel réseau."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (W_PNG, H_PNG), _P_BG_BOT)
+    dr = ImageDraw.Draw(img, "RGB")
+
+    # Fond : dégradé vertical comme l'app
+    bandes = 140
+    for i in range(bandes):
+        t = i / (bandes - 1)
+        r = int(_P_BG_TOP[0] + (_P_BG_BOT[0] - _P_BG_TOP[0]) * t)
+        g = int(_P_BG_TOP[1] + (_P_BG_BOT[1] - _P_BG_TOP[1]) * t)
+        b = int(_P_BG_TOP[2] + (_P_BG_BOT[2] - _P_BG_TOP[2]) * t)
+        dr.rectangle([0, int(i * H_PNG / bandes), W_PNG, int((i + 1) * H_PNG / bandes) + 1], fill=(r, g, b))
+    dr.rectangle([0, 0, W_PNG, 10], fill=_P_LIME)
+
+    f_xs  = _png_police(28)
+    f_s   = _png_police(34)
+    f_s_b = _png_police(34, True)
+    f_m_b = _png_police(44, True)
+    f_l_b = _png_police(58, True)
+
+    M = 70
+    col_w = W_PNG - 2 * M
+
+    y = 60
+    _png_centre(dr, "T R A K T   S M A R T   L I S T S", y, f_xs, _P_MUTED)
+    y += 64
+    _png_centre(dr, f"MON ANNÉE {d['annee']}", y, f_l_b, _P_LIME)
+
+    # Hero : temps total (taille auto-ajustée)
+    y += 130
+    total_txt = str(d["total"])
+    f_hero = _png_font_ajuste(dr, total_txt, col_w, 260, 90)
+    _png_centre(dr, total_txt, y, f_hero, _P_TEXT)
+    y += 270 if getattr(f_hero, "size", 260) >= 130 else 150
+    _png_centre(dr, "de films & séries regardés", y, f_s, _P_MUTED)
+
+    # 3 stat cards
+    y += 90
+    gap = 24
+    cw = (col_w - 2 * gap) // 3
+    ch = 150
+    for i, (lbl, val) in enumerate([("FILMS", d["films"]), ("SÉRIES", d["series"]), ("ÉPISODES", d["episodes"])]):
+        x0 = M + i * (cw + gap)
+        dr.rounded_rectangle([x0, y, x0 + cw, y + ch], radius=24, fill=_P_CARD, outline=_P_BORDER, width=2)
+        cx = x0 + cw // 2
+        tw = dr.textlength(lbl, font=f_xs)
+        dr.text((cx - tw / 2, y + 22), lbl, font=f_xs, fill=_P_MUTED)
+        tw = dr.textlength(str(val), font=f_l_b)
+        dr.text((cx - tw / 2, y + 58), str(val), font=f_l_b, fill=_P_LIME)
+
+    # Tops 2 colonnes
+    y += ch + 60
+    col2 = (col_w - gap) // 2
+    bloc_h = 392
+
+    def bloc_top(x0, titre, items, footer):
+        dr.rounded_rectangle([x0, y, x0 + col2, y + bloc_h], radius=24, fill=_P_CARD, outline=_P_BORDER, width=2)
+        dr.text((x0 + 30, y + 24), titre, font=f_m_b, fill=_P_GREEN)
+        yy = y + 92
+        for i, (t, n) in enumerate(items[:5], 1):
+            label = f"{i}. "
+            phrase = f"{n}×"
+            dr.text((x0 + 30, yy), label, font=f_s_b, fill=_P_LIME)
+            lw = dr.textlength(label, font=f_s_b)
+            t_aff = _png_tronque(dr, t, f_s, col2 - 60 - lw - 78)
+            dr.text((x0 + 30 + lw, yy), t_aff, font=f_s, fill=_P_TEXT)
+            pw = dr.textlength(phrase, font=f_s)
+            dr.text((x0 + col2 - 30 - pw, yy), phrase, font=f_s, fill=_P_MUTED)
+            yy += 46
+        dr.rectangle([x0 + 30, y + bloc_h - 58, x0 + col2 - 30, y + bloc_h - 56], fill=_P_BORDER)
+        dr.text((x0 + 30, y + bloc_h - 46), footer, font=f_xs, fill=_P_MUTED)
+
+    bloc_top(M, "TOP FILMS", d["top_films"] or [("—", 0)], f"note moyenne {d['note_moy']}/10")
+    bloc_top(M + col2 + gap, "TOP SÉRIES", d["top_series"] or [("—", 0)], f"record : {d['record_txt']}")
+
+    # Genres
+    y += bloc_h + 44
+    genres_txt = "  ·  ".join(g.upper() for g, _ in (d["top_genres"] or [])[:3]) or "CINÉMA & SÉRIES"
+    f_genres = _png_font_ajuste(dr, genres_txt, col_w, 44, 28)
+    _png_centre(dr, genres_txt, y, f_genres, _P_LIME)
+
+    # Footer
+    dr.rectangle([M, H_PNG - 92, W_PNG - M, H_PNG - 88], fill=_P_BORDER)
+    _png_centre(dr, f"trakt-smart-lists.streamlit.app  ·  généré le {d['date_gen']}", H_PNG - 70, f_xs, _P_MUTED)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 def page_wrapped():
@@ -3259,6 +3485,34 @@ def page_wrapped():
     liste_mois = ["Janv.","Fév.","Mars","Avr.","Mai","Juin","Juil.","Août","Sept.","Oct.","Nov.","Déc."]
     opt_m = {"title":{"text":f"Heures par mois en {annee}","textStyle":{"color":"#F0FAF8"},"left":"center"},"tooltip":{"trigger":"axis","formatter":"{b} : {c}h"},"backgroundColor":"transparent","textStyle":{"color":"#F0FAF8"},"xAxis":{"type":"category","data":liste_mois,"axisLabel":{"color":"#9DC5BF","interval":0}},"yAxis":{"type":"value","name":"Heures","axisLabel":{"color":"#9DC5BF"},"splitLine":{"lineStyle":{"color":"rgba(18,90,84,0.4)"}}},"series":[{"data":list(h_mois.values),"type":"bar","itemStyle":{"color":"#CEDC00","borderRadius":[4,4,0,0]}}]}
     st_echarts(opt_m, height="350px")
+
+    # --- 🖼️ TODO #4 : IMAGE WRAPPED PARTAGEABLE ---
+    st.divider()
+    st.markdown("### 🖼️ Ton image Wrapped à partager")
+    st.caption("Un récap visuel de ton année, façon Spotify Wrapped, prêt à partager. Généré uniquement au clic : aucun ralentissement de l'app.")
+    if st.button("✨ Générer mon image Wrapped", use_container_width=True, key="btn_wrapped_png"):
+        with st.spinner("Création de ton image..."):
+            data_img = {
+                "annee": annee,
+                "total": format_duree(total_h),
+                "films": nb_films,
+                "series": nb_series,
+                "episodes": nb_eps,
+                "note_moy": str(round(note_moy, 1)).replace(".", ",") if note_moy else "?",
+                "top_films": [(t, int(rw["n"])) for t, rw in top_films.iterrows()],
+                "top_series": [(t, int(rw["eps"])) for t, rw in top_series.iterrows()],
+                "top_genres": sorted(genres_n.items(), key=lambda x: -x[1])[:3] if genres_n else [],
+                "record_txt": f"{nb_peak} vues le {jour_peak.strftime('%d/%m')}",
+                "date_gen": datetime.now(utz).strftime("%d/%m/%Y"),
+            }
+            st.session_state["_wrapped_png"] = generer_image_wrapped(data_img)
+            st.session_state["_wrapped_png_annee"] = annee
+    if st.session_state.get("_wrapped_png") and st.session_state.get("_wrapped_png_annee") == annee:
+        c_img = st.columns([1, 2, 1])[1]
+        with c_img:
+            st.image(st.session_state["_wrapped_png"], use_container_width=True)
+            st.download_button("💾 Télécharger le PNG", data=st.session_state["_wrapped_png"],
+                               file_name=f"wrapped_{annee}.png", mime="image/png", use_container_width=True)
 
 def page_sauvegarde():
     st.subheader("📤 Sauvegarde et restauration")
