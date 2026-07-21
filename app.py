@@ -21,7 +21,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.formatting.rule import ColorScaleRule
 from streamlit_echarts import st_echarts
 
-st.set_page_config(page_title="Trakt Smart Lists", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Trakt Smart Lists", page_icon=("logo.png" if os.path.exists("logo.png") else "🎬"), layout="wide", initial_sidebar_state="collapsed")
 
 # ==================================================
 # UTILITAIRES
@@ -787,17 +787,16 @@ def _progression_fetch_un(at, sid):
             "status": sh.get("status") or "",
             "titre": sh.get("title") or "?",
             "annee": sh.get("year"),
+            "tmdb": ids.get("tmdb"),
             "slug": sh.get("slug") or ids.get("slug") or str(sid),
         }
     except Exception:
         return sid, None
 
-def recuperer_progressions(at, histo, pseudo, forcer=False):
-    """Progression de CHAQUE série de ton historique (même hors listes).
-    Parallélisé (5 requêtes à la fois, comme l'historique) + cache disque :
-    un épisode fini dans 1 h est rattrapé à la prochaine analyse rapide,
-    sans rien re-télécharger d'autre. ZÉRO appel API à l'affichage."""
-    vus, der, titres = {}, {}, {}   # sid -> nb d'épisodes DISTINCTS vus / dernière vue / titre connu
+def _eps_vus_der(histo):
+    """Compte par série : épisodes DISTINCTS vus / date de dernière vue / titre.
+    100% local, depuis l'historique déjà chargé. ZÉRO appel API."""
+    vus, der, titres = {}, {}, {}
     for e in histo.get("ep_det", []):
         sid = e.get("id")
         if not sid:
@@ -807,7 +806,29 @@ def recuperer_progressions(at, histo, pseudo, forcer=False):
         if d > der.get(sid, ""):
             der[sid] = d
         titres.setdefault(sid, e.get("serie") or "?")
-    vus = {sid: len(s) for sid, s in vus.items()}
+    return {sid: len(s) for sid, s in vus.items()}, der, titres
+
+
+def _progressions_source(pseudo, h):
+    """Données de progression SANS appel API : session si dispo, sinon cache
+    disque (et on recompte vus/dernières vues depuis l'historique ACTUEL,
+    donc les % restent fidèles même si la fiche date un peu)."""
+    data = st.session_state.get("progressions")
+    if data:
+        return data
+    prog = prog_cache_lire(pseudo)
+    if not prog:
+        return None
+    vus, der, _ = _eps_vus_der(h)
+    return {"prog": prog, "vus": vus, "der": der}
+
+
+def recuperer_progressions(at, histo, pseudo, forcer=False):
+    """Progression de CHAQUE série de ton historique (même hors listes).
+    Parallélisé (5 requêtes à la fois, comme l'historique) + cache disque :
+    un épisode fini dans 1 h est rattrapé à la prochaine analyse rapide,
+    sans rien re-télécharger d'autre. ZÉRO appel API à l'affichage."""
+    vus, der, titres = _eps_vus_der(histo)
     if not vus:
         return {"prog": {}, "vus": {}, "der": {}}
     cache = {}
@@ -1362,8 +1383,7 @@ def lancer_analyse(rafraichir=False, page_suivante="🏠 Tableau de bord"):
     try:
         at = st.session_state["access_token"]
         pseudo_act = st.session_state.get("infos", {}).get("pseudo", "")
-        hist_present = "historique" in st.session_state  # False = Rafraîchir tout / 1re analyse -> tout recharger
-        if hist_present:
+        if "historique" in st.session_state:
             if rafraichir:
                 # Analyse rapide : simple rattrapage des nouveautés (start_at), quasi instantané
                 st.session_state["historique"] = maj_historique_delta(at, st.session_state["historique"], barre)
@@ -1379,13 +1399,9 @@ def lancer_analyse(rafraichir=False, page_suivante="🏠 Tableau de bord"):
         pb = recuperer_playback(st.session_state["access_token"], barre)
         np = recuperer_lecture(st.session_state["access_token"])
         ratings = recuperer_ratings(st.session_state["access_token"])
-        try:
-            if barre: barre.progress(0.97, text="Progression de tes séries en cours...")
-            st.session_state["progressions"] = recuperer_progressions(
-                st.session_state["access_token"], st.session_state["historique"], pseudo_act,
-                forcer=not hist_present)
-        except Exception:
-            st.session_state["progressions"] = None
+        # NOTE : les progressions des séries ne sont PLUS fetchées ici (ça ralentissait
+        # l'analyse) : le widget lit le cache disque GRATUITEMENT à l'affichage, et un
+        # bouton dédié propose la mise à jour DELTA à la demande (opt-in).
         st.session_state["res"] = res
         st.session_state["stats"] = stats
         st.session_state["doub"] = doub
@@ -1590,6 +1606,7 @@ def naviguer():
     with st.sidebar:
         st.markdown('<p class="section-menu-title">Menu</p>', unsafe_allow_html=True)
         page = st.radio("Navigation", PAGES, index=PAGES.index(st.session_state["page_active"]), label_visibility="collapsed", key="nav")
+        st.caption("🍿 Compatible avec Trakt — *Powered by the Trakt API*, sans affiliation.")
     st.session_state["page_active"] = page
     return page
 
@@ -1608,9 +1625,8 @@ def entete():
                 st.image("trakt-logo.svg", width=42)
         except: pass
     with ct:
-        st.markdown("<h2 style='margin:0; padding:2px 0 0 0; font-weight:800; font-size:1.5em; letter-spacing:-0.5px;'>"
-                    "<span style='background:linear-gradient(90deg,#CEDC00,#00A392); -webkit-background-clip:text; background-clip:text; color:transparent;'>Trakt</span>"
-                    "<span style='color:#F0FAF8;'> Smart Lists</span></h2>"
+        st.markdown("<style>@font-face{font-family:'Manrope';src:url('app/static/fonts/Manrope-ExtraBold.ttf');font-weight:800;font-display:swap;}</style>"
+                    "<h2 style='margin:0; padding:2px 0 0 0; font-family:Manrope,\'DejaVu Sans\',sans-serif; font-weight:800; color:#CEDC00; font-size:1.45em; letter-spacing:0.2px;'>Trakt Smart Lists</h2>"
                     "<div style='height:3px; width:118px; border-radius:2px; background:linear-gradient(90deg,#CEDC00,#00A392);'></div>", unsafe_allow_html=True)
     if "access_token" not in st.session_state:
         st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
@@ -1893,9 +1909,8 @@ def widget_coups_de_coeur(h):
         top = sorted(best.values(), key=lambda x: -x["note"])[:5]
         source_txt = "selon la communauté Trakt (9+ /10), car tu n'as pas encore noté de contenu 9-10."
     st.divider()
-    st.markdown("### ⭐ Mes coups de cœur")
-    st.caption(f"Tes plus belles découvertes, {source_txt} De bons candidats à revoir !")
-    with st.container(border=True):
+    with st.expander(f"⭐ Mes coups de cœur ({len(top)})", expanded=False):
+        st.caption(f"Tes plus belles découvertes, {source_txt} De bons candidats à revoir !")
         cols = st.columns(len(top))
         for i, c in enumerate(top):
             ic = "🎬" if c["type"] == "Film" else "📺"
@@ -1946,9 +1961,8 @@ def widget_bizarreries(h):
         ton, ton_emoji, ton_txt = "PILE DANS LA MOYENNE", "🎯", "tes notes collent bien à celles du public"
         ton_couleur = "#CEDC00"
     st.divider()
-    st.markdown("### 🧭 À contre-courant")
-    st.caption("Tes goûts face à la foule : ton thermomètre de sévérité, puis les contenus où TA note Trakt s'écarte le plus de celle du public.")
-    with st.container(border=True):
+    with st.expander(f"🧭 À contre-courant {ton_emoji}" + (f" — {len(top)} écart(s) notable(s)" if top else " — aucun écart notable"), expanded=False):
+        st.caption("Tes goûts face à la foule : ton thermomètre de sévérité, puis les contenus où TA note Trakt s'écarte le plus de celle du public.")
         st.markdown(f"🌡️ **Thermomètre de sévérité** — sur **{len(deltas)}** contenus notés, tu es : <span style='color:{ton_couleur}; font-weight:800;'>{ton_emoji} {ton}</span> (écart moyen **{moy:+.1f} pt /10**, {ton_txt}).", unsafe_allow_html=True)
         jauge = max(0.0, min(1.0, (moy + 3) / 6))  # -3 = très sévère … +3 = très indulgent
         st.progress(jauge)
@@ -1999,9 +2013,8 @@ def widget_rewatch_radar():
     cands.sort(key=lambda x: (-x["note"], -x["ans"]))
     top = cands[:3]
     st.divider()
-    st.markdown("### 🔁 Rewatch radar")
-    st.caption("Vus une seule fois il y a 3 ans ou plus, et très bien notés — un soir nostalgie ?")
-    with st.container(border=True):
+    with st.expander(f"🔁 Rewatch radar ({len(top)})", expanded=False):
+        st.caption("Vus une seule fois il y a 3 ans ou plus, et très bien notés — un soir nostalgie ?")
         for c in top:
             an = f" ({c['annee']})" if c.get("annee") else ""
             _pl = "s" if c["ans"] > 1 else ""
@@ -2101,7 +2114,7 @@ def _progressions_preparer(data, utz):
                "slug": e.get("slug") or sid_i, "pct": min(100, int(round(vus_n / total * 100))),
                "vus": vus_n, "total": total, "reste": reste,
                "seen_min": vus_n * rt, "reste_min": reste * rt,
-               "next": e.get("next"), "status": status, "jours": j, "a_jour": a_jour}
+               "tmdb": e.get("tmdb"), "next": e.get("next"), "status": status, "jours": j, "a_jour": a_jour}
         if j <= 120 or a_jour:                       # suivie (ou simplement à jour)
             actives.append(row)
             reste_actives += reste
@@ -2187,7 +2200,7 @@ def widget_rythme(utz):
                 st.markdown(f"🏃 Ton rythme : **{rythme_txt} ép./semaine** · **{r['films_mois']}** film(s) sur 30 jours")
             if r["projection"]:
                 p = r["projection"]
-                st.markdown(f"🏁 Au rythme actuel, tes séries en cours seront finies vers le **{p.day} {_MOIS_NOMS[p.month - 1]} {p.year}** *(hors nouvelles saisons… et nouvelles envies 😉)*")
+                st.markdown(f"🏁 Au rythme actuel, tes séries en cours seront finies vers le **{p.day} {_MOIS_NOMS[p.month - 1]} {p.year}** *(hors nouvelles saisons… et nouvelles envies)* 😉")
             elif reste_actives > 0:
                 st.caption("🏁 Regarde encore quelques épisodes et j'estimerai ta date de fin.")
             else:
@@ -2200,20 +2213,80 @@ def widget_rythme(utz):
 
 
 def widget_series_en_cours(utz):
-    """📺 Ta progression DANS TOUTES TES SÉRIES (même hors listes) : %, épisodes vus /
-    restants, temps estimé, prochain épisode. Source : 'progressions' rempli pendant
-    l'analyse -> ZÉRO appel API à l'affichage. Fallback : statistiques des listes."""
-    if not st.session_state.get("progressions"):
-        _widget_series_en_cours_listes()
+    """📺 Ta progression DANS TOUTES TES SÉRIES (même hors listes).
+    Replié par défaut pour laisser respirer le dashboard. Lecture du cache disque :
+    ZÉRO appel API — le bouton 🔄 ne re-télécharge que le DELTA (séries où tu as vu
+    de nouveaux épisodes / fiches périmées). Affiches : activables à la demande."""
+    h = st.session_state.get("historique")
+    if not h:
         return
-    actives, dormantes, _ = _progressions_preparer(st.session_state["progressions"], utz)
+    pseudo = st.session_state.get("infos", {}).get("pseudo", "")
+    data = _progressions_source(pseudo, h)
+    if data is None:
+        # Jamais chargé : on PROPOSE, on n'impose pas (~1 appel par série, une seule fois, parallélisé)
+        vus0, _, _ = _eps_vus_der(h)
+        if not vus0:
+            return
+        st.divider()
+        st.caption(f"📺 En un clic, je calcule ta progression détaillée dans tes **{len(vus0)} séries** : %, temps vu / restant, prochain épisode.")
+        if st.button(f"📺 Charger ma progression ({len(vus0)} séries)", key="btn_prog_init", use_container_width=True):
+            with st.spinner("Chargement des progressions (une seule fois, ensuite c'est en cache)..."):
+                try:
+                    st.session_state["progressions"] = recuperer_progressions(st.session_state["access_token"], h, pseudo, forcer=True)
+                except Exception:
+                    st.session_state["progressions"] = None
+            st.rerun()
+        return
+    actives, dormantes, _ = _progressions_preparer(data, utz)
     if not actives and not dormantes:
         return
     st.divider()
-    st.markdown("### 📺 Où en suis-je dans mes séries ?")
-    st.caption("Toutes tes séries commencées (même hors listes), les plus suivies en ce moment d'abord. Mis à jour à chaque analyse.")
-    if actives:
-        with st.container(border=True):
+    t_maj = ""
+    try:
+        majs = [str(e.get("maj", "")) for e in (data.get("prog") or {}).values() if e.get("maj")]
+        if majs:
+            dm = _dt_iso(max(majs))
+            if dm:
+                t_maj = " · données du " + dm.astimezone(utz).strftime("%d/%m")
+    except Exception:
+        pass
+    _titre = f"📺 Où en suis-je dans mes séries ? ({len(actives)} en cours"
+    _titre += f" · {len(dormantes)} en pause)" if dormantes else ")"
+    with st.expander(_titre, expanded=False):
+        st.caption(f"Toutes tes séries commencées, les plus suivies en ce moment d'abord.{t_maj}")
+        cb, ct = st.columns([0.5, 0.5])
+        with cb:
+            if st.button("🔄 Mettre à jour la progression", key="btn_prog_maj", use_container_width=True,
+                         help="Ne re-télécharge QUE les séries où tu as vu de nouveaux épisodes, ou dont la fiche est périmée."):
+                with st.spinner("Mise à jour (delta uniquement)..."):
+                    try:
+                        st.session_state["progressions"] = recuperer_progressions(st.session_state["access_token"], h, pseudo)
+                    except Exception:
+                        pass
+                st.rerun()
+        with ct:
+            affiches = st.toggle("🖼️ Affiches", value=False, key="tg_prog_posters",
+                                 help="Charge les affiches TMDB, uniquement tant que l'option est active.")
+        if actives and affiches:
+            # Grille compacte de cartes-affiche (4 par ligne, 12 max)
+            for i0 in range(0, min(len(actives), 12), 4):
+                cols = st.columns(4)
+                for j, r in enumerate(actives[i0:i0 + 4]):
+                    with cols[j]:
+                        img = image_tmdb(r.get("tmdb"), "tv") if r.get("tmdb") else None
+                        if img:
+                            st.image(img, use_container_width=True)
+                        else:
+                            st.markdown("📺")
+                        st.markdown(f"<b>{_esc_html(r['titre'])}</b>", unsafe_allow_html=True)
+                        st.progress(r["pct"] / 100)
+                        st.caption(f"{r['vus']}/{r['total']} ép. · reste **{r['reste']}** (~{format_duree(r['reste_min'] / 60)})")
+                        nx = r.get("next")
+                        if r["a_jour"]:
+                            st.caption("✅ à jour des diffusions")
+                        elif nx and nx.get("s") is not None and nx.get("e") is not None:
+                            st.caption(f"▶️ S{int(nx['s']):02d}E{int(nx['e']):02d}")
+        elif actives:
             for r in actives[:8]:
                 an = f" ({r['annee']})" if r.get("annee") else ""
                 lien = (f' <a href="https://trakt.tv/shows/{r["slug"]}" target="_blank" '
@@ -2364,6 +2437,10 @@ def page_dashboard(utz):
         except Exception:
             pass
 
+    # --- TON ACTIVITÉ (0 appel API) : rythme + derniers visionnages, juste après la lecture ---
+    widget_rythme(utz)
+    widget_derniers_vus(utz)
+
     # --- ETAT DU NETTOYAGE : ordonné Fantômes → Déjà vus → Doublons comme dans le menu ---
     st.divider()
     st.subheader("⚠️ État du nettoyage")
@@ -2414,9 +2491,7 @@ def page_dashboard(utz):
     # --- DÉCOUVERTE (en bas du dashboard, après l'action) ---
     # Ordre voulu : 1. lecture en cours  2. état du nettoyage  3. coups de cœur & cie
     # Tous ces widgets utilisent les données DÉJÀ chargées par l'analyse : ZÉRO appel API.
-    widget_rythme(utz)
     widget_series_en_cours(utz)
-    widget_derniers_vus(utz)
     widget_sorties_semaine(utz)
     widget_plus_ancien_watchlist(utz)
     widget_coups_de_coeur(h)
