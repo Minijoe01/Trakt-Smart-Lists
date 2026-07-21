@@ -721,6 +721,138 @@ def hist_cache_supprimer(pseudo):
     except Exception:
         pass
 
+# ==================================================
+# PROGRESSIONS DES SERIES (épisodes diffusés/vus + prochain épisode)
+# Endpoint officiel : GET /shows/{id}/progress/watched (1 appel par série).
+# Résultats CACHÉS sur disque : on ne re-télécharge une série que si tu as vu
+# de nouveaux épisodes dedans, ou si sa fiche est périmée. Affichage : 0 appel.
+# ==================================================
+_PROG_CACHE_VERSION = 1
+
+def _prog_cache_chemin(pseudo):
+    nom = hashlib.sha256(f"tsl::{pseudo}".encode("utf-8")).hexdigest()[:24]
+    return os.path.join(tempfile.gettempdir(), f"tsl_prog_{nom}.json")
+
+def prog_cache_lire(pseudo):
+    if not pseudo:
+        return None
+    try:
+        with open(_prog_cache_chemin(pseudo), "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if d.get("v") != _PROG_CACHE_VERSION:
+            return None
+        prog = d.get("prog")
+        return prog if isinstance(prog, dict) else None
+    except Exception:
+        return None
+
+def prog_cache_ecrire(pseudo, prog):
+    if not pseudo or not isinstance(prog, dict):
+        return
+    try:
+        with open(_prog_cache_chemin(pseudo), "w", encoding="utf-8") as f:
+            json.dump({"v": _PROG_CACHE_VERSION, "prog": prog}, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+def prog_cache_supprimer(pseudo):
+    try:
+        os.remove(_prog_cache_chemin(pseudo))
+    except Exception:
+        pass
+
+def _progression_fetch_un(at, sid):
+    """1 appel officiel : épisodes diffusés/vus + prochain épisode à regarder."""
+    url = f"https://api.trakt.tv/shows/{sid}/progress/watched"
+    try:
+        r = requests.get(url, headers=entetes(at), params={"extended": "full"}, timeout=15)
+        if r.status_code == 429:  # quota : on respecte Retry-After et on retente UNE fois
+            try:
+                time.sleep(min(float(r.headers.get("Retry-After", 2)), 5))
+            except Exception:
+                time.sleep(2)
+            r = requests.get(url, headers=entetes(at), params={"extended": "full"}, timeout=15)
+        if r.status_code != 200:
+            return sid, None
+        d = r.json()
+        sh = d.get("show") or {}
+        ids = sh.get("ids", {}) or {}
+        nxt = d.get("next_episode") or None
+        return sid, {
+            "aired": d.get("aired", 0) or 0,
+            "completed": d.get("completed", 0) or 0,
+            "next": ({"s": nxt.get("season"), "e": nxt.get("number"),
+                      "titre": nxt.get("title") or ""} if nxt else None),
+            "runtime": sh.get("runtime") or 45,
+            "status": sh.get("status") or "",
+            "titre": sh.get("title") or "?",
+            "annee": sh.get("year"),
+            "slug": sh.get("slug") or ids.get("slug") or str(sid),
+        }
+    except Exception:
+        return sid, None
+
+def recuperer_progressions(at, histo, pseudo, forcer=False):
+    """Progression de CHAQUE série de ton historique (même hors listes).
+    Parallélisé (5 requêtes à la fois, comme l'historique) + cache disque :
+    un épisode fini dans 1 h est rattrapé à la prochaine analyse rapide,
+    sans rien re-télécharger d'autre. ZÉRO appel API à l'affichage."""
+    vus, der, titres = {}, {}, {}   # sid -> nb d'épisodes DISTINCTS vus / dernière vue / titre connu
+    for e in histo.get("ep_det", []):
+        sid = e.get("id")
+        if not sid:
+            continue
+        vus.setdefault(sid, set()).add((e.get("saison"), e.get("episode")))
+        d = str(e.get("date", ""))
+        if d > der.get(sid, ""):
+            der[sid] = d
+        titres.setdefault(sid, e.get("serie") or "?")
+    vus = {sid: len(s) for sid, s in vus.items()}
+    if not vus:
+        return {"prog": {}, "vus": {}, "der": {}}
+    cache = {}
+    for k, entree in ({} if forcer else (prog_cache_lire(pseudo) or {})).items():
+        try:
+            kid = int(k)
+        except Exception:
+            continue
+        if kid in vus:
+            cache[kid] = entree
+    maintenant_utc = datetime.now(timezone.utc)
+    def _perime(entree2, sid):
+        if not entree2:
+            return True
+        if entree2.get("watched_hist") != vus.get(sid):
+            return True  # tu as vu de nouveaux épisodes de cette série
+        try:
+            age = (maintenant_utc - datetime.fromisoformat(str(entree2.get("maj", "")))).days
+        except Exception:
+            return True
+        try:
+            j_vue = (maintenant_utc - datetime.fromisoformat(der[sid].replace("Z", "+00:00"))).days
+        except Exception:
+            j_vue = 9999
+        return age > (7 if j_vue <= 90 else 45)  # active : 7 j de fraîcheur ; au placard : 45 j
+    a_faire = [sid for sid in vus if _perime(cache.get(sid), sid)]
+    if a_faire:
+        resultats = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+            futs = [ex.submit(_progression_fetch_un, at, sid) for sid in a_faire]
+            for fut in concurrent.futures.as_completed(futs):
+                try:
+                    sid, entree = fut.result()
+                except Exception:
+                    continue
+                if entree:
+                    if not entree.get("titre") or entree["titre"] == "?":
+                        entree["titre"] = titres.get(sid, "?")  # repli sur le titre de ton historique
+                    entree["watched_hist"] = vus.get(sid, 0)
+                    entree["maj"] = maintenant_utc.isoformat()
+                    resultats[sid] = entree
+        cache.update(resultats)
+        prog_cache_ecrire(pseudo, cache)
+    return {"prog": cache, "vus": vus, "der": der}
+
 def recuperer_listes(at):
     try:
         r = requests.get("https://api.trakt.tv/users/me/lists", headers=entetes(at), timeout=15)
@@ -1230,7 +1362,8 @@ def lancer_analyse(rafraichir=False, page_suivante="🏠 Tableau de bord"):
     try:
         at = st.session_state["access_token"]
         pseudo_act = st.session_state.get("infos", {}).get("pseudo", "")
-        if "historique" in st.session_state:
+        hist_present = "historique" in st.session_state  # False = Rafraîchir tout / 1re analyse -> tout recharger
+        if hist_present:
             if rafraichir:
                 # Analyse rapide : simple rattrapage des nouveautés (start_at), quasi instantané
                 st.session_state["historique"] = maj_historique_delta(at, st.session_state["historique"], barre)
@@ -1246,6 +1379,13 @@ def lancer_analyse(rafraichir=False, page_suivante="🏠 Tableau de bord"):
         pb = recuperer_playback(st.session_state["access_token"], barre)
         np = recuperer_lecture(st.session_state["access_token"])
         ratings = recuperer_ratings(st.session_state["access_token"])
+        try:
+            if barre: barre.progress(0.97, text="Progression de tes séries en cours...")
+            st.session_state["progressions"] = recuperer_progressions(
+                st.session_state["access_token"], st.session_state["historique"], pseudo_act,
+                forcer=not hist_present)
+        except Exception:
+            st.session_state["progressions"] = None
         st.session_state["res"] = res
         st.session_state["stats"] = stats
         st.session_state["doub"] = doub
@@ -1461,10 +1601,17 @@ def entete():
     # En-tete compact mais lisible : logo + titre + connexion + deconnexion sur une seule ligne
     cl, ct, ci, cd = st.columns([0.06, 0.32, 0.47, 0.15])
     with cl:
-        try: st.image("trakt-logo.svg", width=42)
+        try:
+            if os.path.exists("logo.png"):   # ton logo perso si présent, sinon le logo Trakt officiel
+                st.image("logo.png", width=46)
+            else:
+                st.image("trakt-logo.svg", width=42)
         except: pass
     with ct:
-        st.markdown("<h2 style='margin:0; padding:2px 0 0 0; color:#F0FAF8; font-weight:800; font-size:1.5em; letter-spacing:-0.5px;'>Trakt Smart Lists</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='margin:0; padding:2px 0 0 0; font-weight:800; font-size:1.5em; letter-spacing:-0.5px;'>"
+                    "<span style='background:linear-gradient(90deg,#CEDC00,#00A392); -webkit-background-clip:text; background-clip:text; color:transparent;'>Trakt</span>"
+                    "<span style='color:#F0FAF8;'> Smart Lists</span></h2>"
+                    "<div style='height:3px; width:118px; border-radius:2px; background:linear-gradient(90deg,#CEDC00,#00A392);'></div>", unsafe_allow_html=True)
     if "access_token" not in st.session_state:
         st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
         return None
@@ -1503,16 +1650,17 @@ def entete():
                 for k in ["res","stats","doub","doub_det","pb","np","_xl_cache",
                           "_cal_items","_cal_last_key","_qr_resultats","_qr_last_key",
                           "raw_items","raw_wl","_raw_par_liste","_roulette","_roulette_actuel",
-                          "ratings","_wrapped_png","_wrapped_png_annee","_cal_perso"]:
+                          "ratings","progressions","_wrapped_png","_wrapped_png_annee","_cal_perso"]:
                     st.session_state.pop(k, None)
                 lancer_analyse(False, st.session_state["page_active"])
         with c2:
             if st.button("🔃 Rafraîchir tout", use_container_width=True):
                 hist_cache_supprimer(st.session_state.get("infos", {}).get("pseudo", ""))
+                prog_cache_supprimer(st.session_state.get("infos", {}).get("pseudo", ""))
                 for k in ["historique","res","stats","doub","doub_det","pb","np","infos","_xl_cache",
                           "_cal_items","_cal_last_key","_img_cache","_qr_resultats","_qr_last_key",
                           "raw_items","raw_wl","_raw_par_liste","_roulette","_roulette_actuel",
-                          "ratings","_wrapped_png","_wrapped_png_annee","_cal_perso"]:
+                          "ratings","progressions","_wrapped_png","_wrapped_png_annee","_cal_perso"]:
                     st.session_state.pop(k, None)
                 st.rerun()
         with c3:
@@ -1861,8 +2009,8 @@ def widget_rewatch_radar():
 
 
 
-def widget_series_en_cours():
-    """P5 : progression dans les séries de tes listes que tu as COMMENCÉES.
+def _widget_series_en_cours_listes():
+    """P5 (fallback 0-appel) : progression dans les séries de tes listes que tu as COMMENCÉES.
     100% calculé avec les données déjà chargées (historique + aired_episodes des listes)
     -> ZÉRO appel API."""
     h = st.session_state.get("historique")
@@ -1907,6 +2055,221 @@ def widget_series_en_cours():
                 f'<b>{r["vus"]}/{r["total"]}</b> ép. (<b>{r["pct"]}%</b>) · il te reste '
                 f'<b>{r["reste"]} ép.</b> (~{format_duree(reste_h)})', unsafe_allow_html=True)
             st.progress(r["pct"] / 100)
+
+
+_MOIS_NOMS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+              "août", "septembre", "octobre", "novembre", "décembre"]
+
+
+def _dt_iso(s):
+    """Parse une date ISO Trakt -> datetime (None si illisible)."""
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _progressions_preparer(data, utz):
+    """À partir du cache 'progressions' : lignes prêtes à afficher.
+    Retourne (actives, dormantes, reste_actives) — PUR, ZÉRO appel API."""
+    actives, dormantes = [], []
+    reste_actives = 0
+    if not data:
+        return actives, dormantes, 0
+    prog, vus, der = data.get("prog") or {}, data.get("vus") or {}, data.get("der") or {}
+    maintenant = datetime.now(utz)
+    for sid, e in prog.items():
+        try:
+            sid_i = int(sid)
+        except Exception:
+            continue
+        vus_n = max(e.get("completed") or 0, vus.get(sid_i, 0) or 0)
+        if vus_n <= 0:
+            continue
+        total = max(e.get("aired") or 0, vus_n)  # 'aired' peut être en retard sur ta propre vue
+        if total <= 0:
+            continue
+        reste = max(0, total - vus_n)
+        status = (e.get("status") or "").lower()
+        a_jour = (reste == 0 and status in ("returning", "continuing"))
+        if reste == 0 and not a_jour:
+            continue  # série terminée : plus rien à suivre ici
+        d_vue = _dt_iso(der.get(sid_i) or der.get(str(sid_i)))
+        j = (maintenant - d_vue.astimezone(utz)).days if d_vue else 9999
+        rt = e.get("runtime") or 45
+        row = {"titre": e.get("titre") or "?", "annee": e.get("annee"),
+               "slug": e.get("slug") or sid_i, "pct": min(100, int(round(vus_n / total * 100))),
+               "vus": vus_n, "total": total, "reste": reste,
+               "seen_min": vus_n * rt, "reste_min": reste * rt,
+               "next": e.get("next"), "status": status, "jours": j, "a_jour": a_jour}
+        if j <= 120 or a_jour:                       # suivie (ou simplement à jour)
+            actives.append(row)
+            reste_actives += reste
+        else:                                        # > 4 mois sans épisode : pause / abandon ?
+            dormantes.append(row)
+    actives.sort(key=lambda r: r["jours"])           # les plus suivies en ce moment d'abord
+    dormantes.sort(key=lambda r: -r["jours"])        # les plus oubliées d'abord
+    return actives, dormantes, reste_actives
+
+
+def _rythme_calculer(h, utz, reste_actives):
+    """Rythme de visionnage + bilan du mois + compteurs à vie + date de fin projetée.
+    PUR : uniquement l'historique déjà chargé — ZÉRO appel API."""
+    maintenant = datetime.now(utz)
+    dts_eps = []
+    n90 = f30 = 0
+    for e in h.get("ep_det", []):
+        d = _dt_iso(e.get("date"))
+        if not d:
+            continue
+        d = d.astimezone(utz)
+        dts_eps.append(d)
+        if d >= maintenant - timedelta(days=90):
+            n90 += 1
+    for m in h.get("films_det", []):
+        d = _dt_iso(m.get("date"))
+        if not d:
+            continue
+        if d.astimezone(utz) >= maintenant - timedelta(days=30):
+            f30 += 1
+    eps_sem = None
+    if dts_eps:
+        fenetre = min(90, max(1, (maintenant - min(dts_eps)).days))
+        eps_sem = n90 / (fenetre / 7)
+    # Bilan du mois calendaire en cours (façon "monthly recap")
+    b_f = b_e = 0
+    b_min = 0.0
+    for m in h.get("films_det", []):
+        d = _dt_iso(m.get("date"))
+        if d:
+            d = d.astimezone(utz)
+            if d.year == maintenant.year and d.month == maintenant.month:
+                b_f += 1
+                b_min += m.get("duree", 0) or 0
+    for e in h.get("ep_det", []):
+        d = _dt_iso(e.get("date"))
+        if d:
+            d = d.astimezone(utz)
+            if d.year == maintenant.year and d.month == maintenant.month:
+                b_e += 1
+                b_min += e.get("duree", 0) or 0
+    projection = None
+    if eps_sem and eps_sem >= 0.5 and reste_actives > 0:
+        projection = maintenant + timedelta(weeks=reste_actives / eps_sem)
+    return {
+        "eps_sem": eps_sem, "films_mois": f30,
+        "bilan": {"mois": f"{_MOIS_NOMS[maintenant.month - 1]} {maintenant.year}",
+                  "films": b_f, "eps": b_e, "heures": b_min / 60},
+        "compteurs": {"h_series": sum((e.get("duree", 0) or 0) for e in h.get("ep_det", [])) / 60,
+                      "h_films": sum((m.get("duree", 0) or 0) for m in h.get("films_det", [])) / 60,
+                      "nb_ep": len(h.get("ep_det", [])), "nb_films": len(h.get("films_det", []))},
+        "projection": projection,
+    }
+
+
+def widget_rythme(utz):
+    """⏱️ Ton rythme : récap du mois, épisodes/semaine, compteurs à vie, date de fin
+    projetée des séries en cours. Calcul 100% local, ZÉRO appel API."""
+    h = st.session_state.get("historique")
+    if not h or (not h.get("ep_det") and not h.get("films_det")):
+        return
+    _, _, reste_actives = _progressions_preparer(st.session_state.get("progressions"), utz)
+    r = _rythme_calculer(h, utz, reste_actives)
+    b, c = r["bilan"], r["compteurs"]
+    st.divider()
+    st.markdown("### ⏱️ Ton rythme de visionnage")
+    c1, c2 = st.columns([0.55, 0.45])
+    with c1:
+        with st.container(border=True):
+            st.markdown(f"🗓️ **{b['mois'].capitalize()}** : **{format_duree(b['heures'])}** · **{b['eps']}** épisode(s) · **{b['films']}** film(s)")
+            if r["eps_sem"]:
+                rythme_txt = f"{r['eps_sem']:.1f}".replace(".", ",")
+                st.markdown(f"🏃 Ton rythme : **{rythme_txt} ép./semaine** · **{r['films_mois']}** film(s) sur 30 jours")
+            if r["projection"]:
+                p = r["projection"]
+                st.markdown(f"🏁 Au rythme actuel, tes séries en cours seront finies vers le **{p.day} {_MOIS_NOMS[p.month - 1]} {p.year}** *(hors nouvelles saisons… et nouvelles envies 😉)*")
+            elif reste_actives > 0:
+                st.caption("🏁 Regarde encore quelques épisodes et j'estimerai ta date de fin.")
+            else:
+                st.caption("🏁 Aucune série en cours active : rien à projeter pour l'instant.")
+    with c2:
+        with st.container(border=True):
+            st.markdown("📼 **Compteurs à vie**")
+            st.caption(f"📺 Séries : **{format_duree(c['h_series'])}** ({c['nb_ep']} ép.)")
+            st.caption(f"🎬 Films : **{format_duree(c['h_films'])}** ({c['nb_films']} films)")
+
+
+def widget_series_en_cours(utz):
+    """📺 Ta progression DANS TOUTES TES SÉRIES (même hors listes) : %, épisodes vus /
+    restants, temps estimé, prochain épisode. Source : 'progressions' rempli pendant
+    l'analyse -> ZÉRO appel API à l'affichage. Fallback : statistiques des listes."""
+    if not st.session_state.get("progressions"):
+        _widget_series_en_cours_listes()
+        return
+    actives, dormantes, _ = _progressions_preparer(st.session_state["progressions"], utz)
+    if not actives and not dormantes:
+        return
+    st.divider()
+    st.markdown("### 📺 Où en suis-je dans mes séries ?")
+    st.caption("Toutes tes séries commencées (même hors listes), les plus suivies en ce moment d'abord. Mis à jour à chaque analyse.")
+    if actives:
+        with st.container(border=True):
+            for r in actives[:8]:
+                an = f" ({r['annee']})" if r.get("annee") else ""
+                lien = (f' <a href="https://trakt.tv/shows/{r["slug"]}" target="_blank" '
+                        f'style="color:#CEDC00; text-decoration:none; font-size:0.85em;">🔗 Trakt</a>')
+                statut = "🟢" if r["status"] in ("returning", "continuing") else ("✔️" if r["status"] == "ended" else "📺")
+                st.markdown(f"{statut} <b>{_esc_html(r['titre'])}</b>{an}{lien}", unsafe_allow_html=True)
+                if r["a_jour"]:
+                    st.caption(f"✅ **Tu es à jour** : {r['vus']} ép. vus (≈ {format_duree(r['seen_min'] / 60)}) — en attente des prochaines diffusions.")
+                else:
+                    st.caption(f"**{r['pct']}%** · {r['vus']}/{r['total']} ép. vus (≈ {format_duree(r['seen_min'] / 60)}) · il te reste **{r['reste']} ép.** (≈ {format_duree(r['reste_min'] / 60)})")
+                    nx = r.get("next")
+                    if nx and nx.get("s") is not None and nx.get("e") is not None:
+                        t_nx = nx.get("titre") or ""
+                        t_nx = (t_nx[:34] + "…") if len(t_nx) > 36 else t_nx
+                        t_nx = f" « {_esc_html(t_nx)} »" if t_nx else ""
+                        st.caption(f"▶️ **Prochain épisode : S{int(nx['s']):02d}E{int(nx['e']):02d}**{t_nx}")
+                st.progress(r["pct"] / 100)
+    if dormantes:
+        with st.expander(f"💤 En pause ou à l'abandon ? ({len(dormantes)})", expanded=False):
+            st.caption("Pas d'épisode vu depuis plus de 4 mois et il en reste à regarder. À reprendre… ou à lâcher sans culpabiliser !")
+            for r in dormantes:
+                mois = max(1, r["jours"] // 30)
+                an = f" ({r['annee']})" if r.get("annee") else ""
+                lien = (f' <a href="https://trakt.tv/shows/{r["slug"]}" target="_blank" '
+                        f'style="color:#CEDC00; text-decoration:none; font-size:0.85em;">🔗 Trakt</a>')
+                st.markdown(f"📺 <b>{_esc_html(r['titre'])}</b>{an}{lien} — **{r['pct']}%** · pas d'épisode vu depuis **{mois} mois** · il en reste {r['reste']} (≈ {format_duree(r['reste_min'] / 60)})", unsafe_allow_html=True)
+
+
+def widget_derniers_vus(utz):
+    """🕘 Tes derniers visionnages (films + épisodes mélangés) — repliable, 0 appel."""
+    h = st.session_state.get("historique")
+    if not h:
+        return
+    evts = []
+    for m in h.get("films_det", []):
+        d = _dt_iso(m.get("date"))
+        if d:
+            an = f" ({m['annee']})" if m.get("annee") else ""
+            evts.append((d, f"🎬 <b>{_esc_html(m.get('titre', '?'))}</b>{an}"))
+    for e in h.get("ep_det", []):
+        d = _dt_iso(e.get("date"))
+        if d:
+            try:
+                se = f"S{int(e.get('saison', 0)):02d}E{int(e.get('episode', 0)):02d}"
+            except Exception:
+                se = ""
+            evts.append((d, f"📺 <b>{_esc_html(e.get('serie', '?'))}</b> — {se}"))
+    if not evts:
+        return
+    evts.sort(key=lambda t: t[0], reverse=True)
+    maintenant = datetime.now(utz)
+    with st.expander("🕘 Tes derniers visionnages", expanded=False):
+        for d, lbl in evts[:12]:
+            j = (maintenant - d.astimezone(utz)).days
+            rel = "aujourd'hui" if j <= 0 else ("hier" if j == 1 else f"il y a {j} j")
+            st.markdown(f"<span style='color:#9DC5BF; font-size:0.85em;'>{rel}</span> · {lbl}", unsafe_allow_html=True)
 
 
 def widget_plus_ancien_watchlist(utz):
@@ -2051,7 +2414,9 @@ def page_dashboard(utz):
     # --- DÉCOUVERTE (en bas du dashboard, après l'action) ---
     # Ordre voulu : 1. lecture en cours  2. état du nettoyage  3. coups de cœur & cie
     # Tous ces widgets utilisent les données DÉJÀ chargées par l'analyse : ZÉRO appel API.
-    widget_series_en_cours()
+    widget_rythme(utz)
+    widget_series_en_cours(utz)
+    widget_derniers_vus(utz)
     widget_sorties_semaine(utz)
     widget_plus_ancien_watchlist(utz)
     widget_coups_de_coeur(h)
@@ -3187,6 +3552,15 @@ def construire_profil(histo, utz):
             if g and g != "Inconnu" and info.get("note", 0) > 0:
                 notes_perso_par_genre.setdefault(g, []).append(info["note"])
     genres_perso = {k: sum(v)/len(v) for k, v in notes_perso_par_genre.items() if v}
+    # Tes "ratages" perso : nb de contenus que TU as notés ≤ 3/10, par genre.
+    # (La moyenne juste au-dessus = ton amour global du genre ; ici on compte
+    # les vraies déceptions unitaires -> léger malus dans evaluer_contenu.)
+    deceptions_perso = {}
+    for info in st.session_state.get("ratings", {}).values():
+        if info.get("note", 0) and info["note"] <= 3:
+            for g in info.get("genres") or []:
+                if g and g != "Inconnu":
+                    deceptions_perso[g] = deceptions_perso.get(g, 0) + 1
 
     # --- S1. TA durée idéale : percentiles des films réellement regardés ---
     duree_pref = None
@@ -3223,6 +3597,7 @@ def construire_profil(histo, utz):
 
     return {
         "genres_perso": genres_perso,
+        "deceptions_perso": deceptions_perso,
         "duree_pref": duree_pref,
         "genres_recents": genres_recents,
         "eps_vus": eps_vus,
@@ -3320,6 +3695,16 @@ def evaluer_contenu(item, profil, maintenant_tz):
             elif moy_perso <= 5:
                 score -= 6
                 points_noirs.append("Genre que tu notes bas (d'après tes notes Trakt) (-6)")
+
+    # 2c. Malus "tes propres ratages" : ≥ 2 contenus de ce genre déjà notés ≤ 3/10
+    # par TOI → léger doute (-5), appliqué une seule fois même si plusieurs genres.
+    dec = profil.get("deceptions_perso", {})
+    if genres and dec:
+        nb_ratages = max((dec.get(g, 0) for g in genres), default=0)
+        if nb_ratages >= 2:
+            score -= 5
+            points_noirs.append(f"Genre de tes déceptions : {nb_ratages} contenu(s) noté(s) ≤ 3/10 par toi (-5)")
+            tags.append(("👎 Tes ratages ici", f"Tu as déjà mis ≤ 3/10 à {nb_ratages} contenu(s) de ce genre · −5 pts"))
 
     # S2. Alternance DOUCE (pas de malus : si tu enchaînes un genre, c'est que tu l'aimes).
     # Petit bonus "varier un peu" SEULEMENT si tes dernières vues sont saturées d'un genre
@@ -3433,8 +3818,8 @@ def evaluer_contenu(item, profil, maintenant_tz):
         elif status_txt in ("returning", "continuing"):
             if nb_aired > 0:
                 raisons.append("Série en cours de diffusion")
-                if nb_aired <= 13:
-                    tags.append(("🌱 Jeune série", "1 saison et en cours — monte à bord tôt"))
+                if nb_aired <= 20:
+                    tags.append(("🌱 Jeune série", f"Encore jeune ({nb_aired} ép. diffusés) et toujours en cours — monte à bord tôt"))
         elif status_txt == "canceled":
             points_noirs.append("Série annulée")
         elif status_txt in ("in production", "planned", "pilot"):
@@ -3844,19 +4229,39 @@ def page_quoi_regarder(utz):
     st.markdown(f"**{len(filtrés)}** contenus évalués.")
 
     # TODO #2 : 🎲 Roulette — pioche dans les contenus FILTRÉS (respecte type, genre, note, durée, statut + recherche)
-    col_roul, col_info = st.columns([0.4, 0.6])
+    def _pool_roulette(mode):
+        if mode == "decouverte":
+            hz = _PRESETS_QR["🧭 Hors de ta zone de confort"]
+            return [r for r in filtrés if not r.get("pas_pour_moi") and r["titre"] != st.session_state.get("_roulette_actuel") and hz(r, profil, utz)]
+        pool0 = [r for r in filtrés if r["score"] >= 70 and not r.get("pas_pour_moi") and r["titre"] != st.session_state.get("_roulette_actuel")]
+        if not pool0:  # si les filtres sont trop restrictifs, on prend le top dispo
+            pool0 = sorted([r for r in filtrés if r["titre"] != st.session_state.get("_roulette_actuel")], key=lambda x: -x["score"])[:10]
+        return pool0
+    col_roul, col_roul2, col_info = st.columns([0.3, 0.3, 0.4])
     with col_roul:
         if st.button("🎲 Roulette — Je ne sais pas quoi regarder", use_container_width=True, key="btn_roulette"):
-            pool = [r for r in filtrés if r["score"] >= 70 and not r.get("pas_pour_moi") and r["titre"] != st.session_state.get("_roulette_actuel")]
-            if not pool:  # si les filtres sont trop restrictifs, on prend le top dispo
-                pool = sorted([r for r in filtrés if r["titre"] != st.session_state.get("_roulette_actuel")], key=lambda x: -x["score"])[:10]
+            pool = _pool_roulette("classique")
             if pool:
                 choix = random.choices(pool, weights=[max(1.0, r["score"]) for r in pool], k=1)[0]
                 st.session_state["_roulette"] = choix
                 st.session_state["_roulette_actuel"] = choix["titre"]
+                st.session_state["_roulette_mode"] = "classique"
                 st.rerun()
+    with col_roul2:
+        if st.button("🧭 Roulette découverte — sors de ta zone", use_container_width=True, key="btn_roulette_decouverte"):
+            pool = _pool_roulette("decouverte")
+            if pool:
+                choix = random.choices(pool, weights=[max(1.0, r["score"]) for r in pool], k=1)[0]
+                st.session_state["_roulette"] = choix
+                st.session_state["_roulette_actuel"] = choix["titre"]
+                st.session_state["_roulette_mode"] = "decouverte"
+            else:
+                st.session_state["_roulette_vide_hors_zone"] = True
+            st.rerun()
     with col_info:
-        st.caption("🎲 La roulette pioche dans **tes filtres actifs** (type, genre, note, durée, statut).")
+        st.caption("🎲 La roulette pioche dans **tes filtres actifs** · 🧭 La **découverte** pioche exprès **hors de ta zone de confort** (genres peu vus chez toi, mais bien notés ≥ 7,5).")
+    if st.session_state.pop("_roulette_vide_hors_zone", None):
+        st.caption("🧭 Aucun contenu « hors zone de confort » dans ta sélection actuelle — élargis la liste ou retire des filtres.")
 
     roul = st.session_state.get("_roulette")
     if roul:
@@ -3873,7 +4278,8 @@ def page_quoi_regarder(utz):
                 an_r = f" ({roul['annee']})" if roul.get("annee") else ""
                 lien_r = roul.get("lien")
                 lien_html_r = f' <a href="{lien_r}" target="_blank" style="color:#CEDC00; text-decoration:none; font-size:0.9em;">🔗</a>' if lien_r else ""
-                st.markdown(f"🎲 **Le hasard a choisi : {roul['type']} — {roul['titre']}{an_r}**{lien_html_r}", unsafe_allow_html=True)
+                _intro_r = "🧭 **L'aventure a choisi (hors zone de confort) :" if st.session_state.get("_roulette_mode") == "decouverte" else "🎲 **Le hasard a choisi :"
+                st.markdown(f"{_intro_r} {roul['type']} — {roul['titre']}{an_r}**{lien_html_r}", unsafe_allow_html=True)
                 note_r = f"{roul['note']}/10" if roul.get("note") else "Note inconnue"
                 ep_r = f" · 📺 {roul['nb_episodes']} ép." if roul["type"] == "Série" and roul.get("nb_episodes", 0) > 0 else ""
                 st.caption(f"⭐ {note_r} · ⏱️ {roul['temps']} · 🎭 {roul['genres']}{ep_r} · Score {int(roul['score'])}/100")
@@ -3882,9 +4288,13 @@ def page_quoi_regarder(utz):
                 if _pills_r:
                     st.markdown("".join(_pills_r), unsafe_allow_html=True)
                 if st.button("🎲 Une autre ?", key="btn_roulette_next"):
-                    pool = [r for r in filtrés if r["score"] >= 70 and not r.get("pas_pour_moi") and r["titre"] != roul["titre"]]
-                    if not pool:
-                        pool = sorted([r for r in filtrés if r["titre"] != roul["titre"]], key=lambda x: -x["score"])[:10]
+                    if st.session_state.get("_roulette_mode") == "decouverte":
+                        _hz_n = _PRESETS_QR["🧭 Hors de ta zone de confort"]
+                        pool = [r for r in filtrés if not r.get("pas_pour_moi") and r["titre"] != roul["titre"] and _hz_n(r, profil, utz)]
+                    else:
+                        pool = [r for r in filtrés if r["score"] >= 70 and not r.get("pas_pour_moi") and r["titre"] != roul["titre"]]
+                        if not pool:
+                            pool = sorted([r for r in filtrés if r["titre"] != roul["titre"]], key=lambda x: -x["score"])[:10]
                     if pool:
                         choix = random.choices(pool, weights=[max(1.0, r["score"]) for r in pool], k=1)[0]
                         st.session_state["_roulette"] = choix
@@ -4311,6 +4721,7 @@ def page_sauvegarde():
                     if data.get("doublons"): st.session_state["doub"] = data["doublons"]
                     if data.get("doublons_det"): st.session_state["doub_det"] = data["doublons_det"]
                     if data.get("fantomes"): st.session_state["pb"] = data["fantomes"]
+                    if data.get("progressions"): st.session_state["progressions"] = data["progressions"]
                     try:
                         st.session_state["np"] = recuperer_lecture(at)
                     except Exception:
@@ -4368,6 +4779,7 @@ def page_sauvegarde():
             "doublons": doub,
             "doublons_det": st.session_state.get("doub_det", []),
             "fantomes": pb,
+            "progressions": st.session_state.get("progressions"),
         }
         import json
         data_json = json.dumps(sauvegarde, ensure_ascii=False, indent=2, default=str)
