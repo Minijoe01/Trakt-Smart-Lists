@@ -604,12 +604,12 @@ def _parser_historique(items, films_det, ep_det):
             if it["type"] == "movie":
                 m = it["movie"]
                 tid = m["ids"]["trakt"]
-                films_det.append({"titre":m["title"],"annee":m.get("year"),"genre":", ".join(m.get("genres",[])) if m.get("genres") else "Inconnu","duree":m.get("runtime",0) or 0,"note":m.get("rating",0) or 0,"date":it["watched_at"],"id":tid})
+                films_det.append({"titre":m["title"],"annee":m.get("year"),"genre":", ".join(m.get("genres",[])) if m.get("genres") else "Inconnu","duree":m.get("runtime",0) or 0,"note":m.get("rating",0) or 0,"date":it["watched_at"],"id":tid,"country":m.get("country")})
             elif it["type"] == "episode":
                 s = it["show"]
                 ep = it["episode"]
                 sid = s["ids"]["trakt"]
-                ep_det.append({"serie":s["title"],"titre":ep["title"],"saison":ep["season"],"episode":ep["number"],"annee":s.get("year"),"genre":", ".join(s.get("genres",[])) if s.get("genres") else "Inconnu","duree":ep.get("runtime",0) or s.get("runtime",40) or 40,"note":s.get("rating",0) or 0,"date":it["watched_at"],"id":sid,"network":s.get("network","Inconnu")})
+                ep_det.append({"serie":s["title"],"titre":ep["title"],"saison":ep["season"],"episode":ep["number"],"annee":s.get("year"),"genre":", ".join(s.get("genres",[])) if s.get("genres") else "Inconnu","duree":ep.get("runtime",0) or s.get("runtime",40) or 40,"note":s.get("rating",0) or 0,"date":it["watched_at"],"id":sid,"network":s.get("network","Inconnu"),"country":s.get("country")})
         except Exception:
             continue
 
@@ -683,6 +683,8 @@ def maj_historique_delta(at, ancien, barre=None):
             ep_det.append(x)
     return _agreger_historique(films_det, ep_det)
 
+_HIST_CACHE_VERSION = 2  # v2 = ajout du champ 'country' ; un vieux cache est ignoré (full refetch parallèle)
+
 def _hist_cache_chemin(pseudo):
     nom = hashlib.sha256(f"tsl::{pseudo}".encode("utf-8")).hexdigest()[:24]
     return os.path.join(tempfile.gettempdir(), f"tsl_hist_{nom}.json")
@@ -695,8 +697,11 @@ def hist_cache_lire(pseudo):
     try:
         with open(_hist_cache_chemin(pseudo), "r", encoding="utf-8") as f:
             d = json.load(f)
-        if d.get("films_det") is not None and d.get("ep_det") is not None:
-            return d
+        if d.get("v") != _HIST_CACHE_VERSION:
+            return None
+        histo = d.get("histo", {})
+        if histo.get("films_det") is not None and histo.get("ep_det") is not None:
+            return histo
     except Exception:
         pass
     return None
@@ -706,7 +711,7 @@ def hist_cache_ecrire(pseudo, histo):
         return
     try:
         with open(_hist_cache_chemin(pseudo), "w", encoding="utf-8") as f:
-            json.dump(histo, f, ensure_ascii=False)
+            json.dump({"v": _HIST_CACHE_VERSION, "histo": histo}, f, ensure_ascii=False)
     except Exception:
         pass
 
@@ -841,6 +846,7 @@ def comparer(items, histo):
 def analyser(at, histo, barre=None):
     res, stats, app = [], [], {}
     raw_items, _seen_raw = [], set()  # items bruts dédupliqués (pour les widgets dashboard/roulette)
+    raw_par_liste = {}  # ⚡ items bruts PAR liste : 'Que regarder ?' et le Calendrier puiseront dedans — 0 appel en plus
     def aj(it, nom, lid):
         if it["type"] == "movie":
             med, t = it["movie"], "Film"
@@ -857,6 +863,7 @@ def analyser(at, histo, barre=None):
         app[cle]["dans"].append({"nom":nom,"lid":lid})
     if barre: barre.progress(0.6, text="Analyse liste de suivi...")
     wl = recuperer_watchlist(at)
+    raw_par_liste["Liste de suivi"] = wl
     for it in wl: aj(it, "Liste de suivi", "watchlist")
     m = comparer(wl, histo)
     for x in m:
@@ -869,6 +876,7 @@ def analyser(at, histo, barre=None):
     for i,l in enumerate(listes):
         if barre: barre.progress(0.6 + (i+1)/max(len(listes),1)*0.3, text=f"Analyse : {l['name']}")
         items = recuperer_contenu_liste(at, l["ids"]["trakt"])
+        raw_par_liste[l["name"]] = items
         for it in items: aj(it, l["name"], l["ids"]["trakt"])
         m = comparer(items, histo)
         for x in m:
@@ -883,7 +891,7 @@ def analyser(at, histo, barre=None):
             doublons.append({"type":info["type"],"titre":info["titre"],"annee":info["annee"],"tmdb":info["tmdb"],"nb_listes":len(info["dans"]),"listes":", ".join(v["nom"] for v in info["dans"])})
             for v in info["dans"]:
                 doublons_det.append({"type":info["type"],"titre":info["titre"],"annee":info["annee"],"tid":info["tid"],"liste":v["nom"],"lid":v["lid"]})
-    return res, stats, doublons, doublons_det, raw_items, wl
+    return res, stats, doublons, doublons_det, raw_items, wl, raw_par_liste
 
 def recuperer_playback(at, barre=None):
     if barre: barre.progress(0.95, text="Recherche des fantômes...")
@@ -1234,7 +1242,7 @@ def lancer_analyse(rafraichir=False, page_suivante="🏠 Tableau de bord"):
             else:
                 st.session_state["historique"] = recuperer_historique(at, barre)
             hist_cache_ecrire(pseudo_act, st.session_state["historique"])
-        res, stats, doub, doub_det, raw_items, raw_wl = analyser(st.session_state["access_token"], st.session_state["historique"], barre)
+        res, stats, doub, doub_det, raw_items, raw_wl, raw_par_liste = analyser(st.session_state["access_token"], st.session_state["historique"], barre)
         pb = recuperer_playback(st.session_state["access_token"], barre)
         np = recuperer_lecture(st.session_state["access_token"])
         ratings = recuperer_ratings(st.session_state["access_token"])
@@ -1244,6 +1252,7 @@ def lancer_analyse(rafraichir=False, page_suivante="🏠 Tableau de bord"):
         st.session_state["doub_det"] = doub_det
         st.session_state["raw_items"] = raw_items  # items bruts de TOUTES les listes (dédupliqués)
         st.session_state["raw_wl"] = raw_wl        # items bruts de la liste de suivi (accès listed_at)
+        st.session_state["_raw_par_liste"] = raw_par_liste  # ⚡ items bruts par liste (QR/Calendrier : 0 refetch)
         st.session_state["ratings"] = ratings      # TES notes perso Trakt (films + séries)
         st.session_state["pb"] = pb
         st.session_state["np"] = np
@@ -1493,7 +1502,7 @@ def entete():
             if st.button("🔄 Analyse rapide", use_container_width=True):
                 for k in ["res","stats","doub","doub_det","pb","np","_xl_cache",
                           "_cal_items","_cal_last_key","_qr_resultats","_qr_last_key",
-                          "raw_items","raw_wl","_roulette","_roulette_actuel",
+                          "raw_items","raw_wl","_raw_par_liste","_roulette","_roulette_actuel",
                           "ratings","_wrapped_png","_wrapped_png_annee","_cal_perso"]:
                     st.session_state.pop(k, None)
                 lancer_analyse(False, st.session_state["page_active"])
@@ -1502,7 +1511,7 @@ def entete():
                 hist_cache_supprimer(st.session_state.get("infos", {}).get("pseudo", ""))
                 for k in ["historique","res","stats","doub","doub_det","pb","np","infos","_xl_cache",
                           "_cal_items","_cal_last_key","_img_cache","_qr_resultats","_qr_last_key",
-                          "raw_items","raw_wl","_roulette","_roulette_actuel",
+                          "raw_items","raw_wl","_raw_par_liste","_roulette","_roulette_actuel",
                           "ratings","_wrapped_png","_wrapped_png_annee","_cal_perso"]:
                     st.session_state.pop(k, None)
                 st.rerun()
@@ -2300,7 +2309,18 @@ def page_calendrier(utz):
     if st.session_state.get("_cal_last_key") != cache_key_cal:
         with st.spinner("Récupération du calendrier..."):
             try:
-                if lid_nom == "__ALL__":
+                _src = st.session_state.get("_raw_par_liste")
+                if _src is not None:
+                    # ⚡ 0 appel API : items déjà chargés par l'analyse
+                    if lid_nom == "__ALL__":
+                        items = []
+                        for _lst in _src.values():
+                            items.extend(_lst)
+                    elif lid_nom == "watchlist":
+                        items = list(_src.get("Liste de suivi", []))
+                    else:
+                        items = list(_src.get(lid_nom, []))
+                elif lid_nom == "__ALL__":
                     items = []
                     try:
                         items.extend(recuperer_watchlist(at))
@@ -2579,6 +2599,9 @@ def page_succes(utz):
     total_eps = h["nb_ep"]
     total_vues = h["nb_vf"] + h["nb_ep"]
 
+    # 🔁 Rewatch : films revus au moins 2 fois (les "vues" des séries comptent des épisodes, pas des revisionnages)
+    nb_rewatch = sum(1 for f in h["films"].values() if f.get("vues", 0) >= 2)
+
     # Calculs pour badges de diversite
     films_df = pd.DataFrame(h["films_det"])
     eps_df = pd.DataFrame(h["ep_det"])
@@ -2737,6 +2760,8 @@ def page_succes(utz):
         ("str7",  "🔥", "Semaine de feu",       "Tu as regardé du contenu 7 jours d'affilée (au moins une fois)",      streak_max >= 7,      min(streak_max/7*100,100)),
         ("str30", "🥵", "Mois de feu",          "30 jours d'affilée avec au moins un visionnage — une machine !",      streak_max >= 30,     min(streak_max/30*100,100)),
         ("note9", "💯", "Critique exigeant",    "Au moins un contenu noté 9 ou 10 — tu as eu un coup de cœur",        note_coup_coeur,    100 if note_coup_coeur else 0),
+        ("rew5",  "🔁", "Fan de rewatch",       "5 films revus au moins 2 fois — les bons films méritent un second regard", nb_rewatch >= 5,  min(nb_rewatch/5*100,100)),
+        ("rew10", "♾️", "Maître du rewatch",    "10 films revus au moins 2 fois — tu cultives tes classiques perso",       nb_rewatch >= 10, min(nb_rewatch/10*100,100)),
     ]
 
     obtenus = [b for b in badges if b[4]]
@@ -3089,6 +3114,7 @@ def construire_profil(histo, utz):
     genres_score = {}
     reseaux_score = {}
     decennies_score = {}
+    pays_score = {}
     notes_par_genre = {}
     total_duree = 0.0
     # Décroissance temporelle : une vue d'il y a 2 ans compte ~2x moins qu'une vue
@@ -3109,6 +3135,9 @@ def construire_profil(histo, utz):
             total_duree += d
             poids = _poids_recence(r.get("date"))
             note = r.get("note", 0) or 0
+            pays = r.get("country")
+            if pays:
+                pays_score[pays] = pays_score.get(pays, 0) + d * poids
             for g in str(r.get("genre","")).split(", "):
                 if g and g != "Inconnu":
                     genres_score[g] = genres_score.get(g,0) + d * poids
@@ -3136,6 +3165,9 @@ def construire_profil(histo, utz):
             net = r.get("network")
             if net and net != "Inconnu":
                 reseaux_score[net] = reseaux_score.get(net,0) + d * poids
+            pays = r.get("country")
+            if pays:
+                pays_score[pays] = pays_score.get(pays, 0) + d * poids
             try:
                 an = int(r.get("annee")) if r.get("annee") else None
                 if an:
@@ -3198,10 +3230,19 @@ def construire_profil(histo, utz):
         "genres": normaliser(genres_score),
         "reseaux": normaliser(reseaux_score),
         "decennies": normaliser(decennies_score),
+        "pays": normaliser(pays_score),
         "note_genre": note_moy_genre,
         "total_h": total_duree/60,
         "date_plus_recent": pd.Timestamp.now(tz=utz)
     }
+
+_PAYS_NOMS = {"fr": "français", "gb": "britannique", "jp": "japonais", "kr": "coréen du sud",
+              "de": "allemand", "es": "espagnol", "it": "italien", "ca": "canadien",
+              "au": "australien", "be": "belge", "cn": "chinois", "hk": "hongkongais",
+              "in": "indien", "mx": "mexicain", "se": "suédois", "dk": "danois",
+              "no": "norvégien", "nl": "néerlandais", "ie": "irlandais", "pt": "portugais",
+              "br": "brésilien", "ar": "argentin", "pl": "polonais", "tr": "turc"}
+
 
 def evaluer_contenu(item, profil, maintenant_tz):
     """Retourne un score 0-100 + raisons détaillées (pour Excel) + tags courts
@@ -3300,6 +3341,17 @@ def evaluer_contenu(item, profil, maintenant_tz):
             raisons.append("Parfait pour une fin de soirée (+7)")
             tags.append(("🌙 Fin de soirée", f"Contenu court, il est {maintenant_tz.hour}h passées · +7 pts"))
 
+    # Pays (0 appel : champ Trakt déjà chargé) — tag discret + petit bonus si pays du cœur
+    pays = med.get("country") or ""
+    if pays and pays != "us":
+        pays_lbl = _PAYS_NOMS.get(pays, pays.upper())
+        if profil.get("pays", {}).get(pays, 0) >= 50:
+            score += 4
+            raisons.append(f"Cinéma {pays_lbl}, que tu regardes souvent (+4)")
+            tags.append((f"🌍 Cinéma {pays_lbl}", f"Un pays dont tu regardes beaucoup de contenus · +4 pts"))
+        else:
+            tags.append((f"🌍 Cinéma {pays_lbl}", f"Produit en {pays.upper()} — ça change d'Hollywood"))
+
     # 3. Recence / classiques
     if annee:
         age = maintenant_tz.year - annee
@@ -3381,6 +3433,8 @@ def evaluer_contenu(item, profil, maintenant_tz):
         elif status_txt in ("returning", "continuing"):
             if nb_aired > 0:
                 raisons.append("Série en cours de diffusion")
+                if nb_aired <= 13:
+                    tags.append(("🌱 Jeune série", "1 saison et en cours — monte à bord tôt"))
         elif status_txt == "canceled":
             points_noirs.append("Série annulée")
         elif status_txt in ("in production", "planned", "pilot"):
@@ -3405,6 +3459,8 @@ def evaluer_contenu(item, profil, maintenant_tz):
             score += 8
             raisons.append(f"⏳ Déjà commencée : il te reste {nb_aired - vus_show} ép. (+8)")
             tags.append(("⏳ À continuer", f"Déjà commencée : il te reste {nb_aired - vus_show} ép. · +8 pts"))
+            if vus_show >= 0.8 * nb_aired:
+                tags.append(("🏁 Presque finie", f"Plus que {nb_aired - vus_show} ép. — la ligne d'arrivée !"))
     if (("Film" if item["type"] == "movie" else "Série"), tid_med) in profil.get("ghosts", set()):
         deja_commence = True
         score += 6
@@ -3450,6 +3506,8 @@ def evaluer_contenu(item, profil, maintenant_tz):
     if deja_commence:
         fric += 12  # reprendre = effort quasi nul
     fric = max(0, min(100, fric))
+    if fric >= 95:
+        tags.append(("🚪 Zéro effort", f"Facilité de lancement {fric}/100 — démarre sans réfléchir"))
 
     # Ne correspond pas a mon profil si score bas OU points noirs importants
     pas_pour_moi = (score < 35) or (len(points_noirs) >= 2)
@@ -3497,6 +3555,7 @@ def evaluer_contenu(item, profil, maintenant_tz):
         "friction": fric,
         "tid": med.get("ids", {}).get("trakt"),
         "certification": cert,
+        "country": pays,
     }
 
 # --- Filtres "Que regarder ?" : valeurs par défaut + bouton tout réinitialiser ---
@@ -3538,6 +3597,10 @@ _PRESETS_QR = {
     "🆕 Fraîchement ajoutés (15 jours)": lambda r, p, z: r.get("ajout") is not None and r["ajout"] <= 15,
     "🏆 Classiques cultes (25 ans et +)": lambda r, p, z: (r["note"] or 0) >= 8 and (r.get("annee") or 9999) <= datetime.now(z).year - 25,
     "🧭 Hors de ta zone de confort": lambda r, p, z: r["genres_liste"] and all(p.get("genres", {}).get(g, 0) < 30 for g in r["genres_liste"]) and (r["note"] or 0) >= 7.5,
+    "✨ Récent & acclamé (≤ 2 ans, note ≥ 7.5)": lambda r, p, z: (r["note"] or 0) >= 7.5 and (r.get("annee") or 0) >= datetime.now(z).year - 2,
+    "🗳️ Plébiscite critique + public": lambda r, p, z: (r["note"] or 0) >= 8 and r.get("votes", 0) >= 50000,
+    "🚪 Zéro effort ce soir": lambda r, p, z: r.get("friction", 0) >= 90,
+    "🌍 Cinéma du monde (hors US, note ≥ 7)": lambda r, p, z: r.get("country") and r["country"] != "us" and (r["note"] or 0) >= 7,
 }
 
 
@@ -3547,6 +3610,7 @@ def page_quoi_regarder(utz):
     st.caption("Sélectionne une liste, applique tes filtres et laisse-moi te recommander le prochain contenu à regarder selon TES goûts. Fini le scroll infini !")
 
     h = st.session_state["historique"]
+    st.caption(f"🧠 Score calculé sur **{h['nb_vf'] + h['nb_ep']}** visionnages ({h['nb_films']} films, {h['nb_series']} séries + tes notes Trakt) — plus tu regardes et notes, plus il est fidèle.")
     profil = construire_profil(h, utz)
 
     listes_dispo = [("🌟 Toutes les listes confondues", "__ALL__"),
@@ -3571,7 +3635,18 @@ def page_quoi_regarder(utz):
         st.session_state.pop("_roulette", None)  # nouvelle liste -> nouvelle pioche
         with st.spinner("Analyse intelligente de la liste..."):
             try:
-                if lid_nom == "watchlist":
+                _src = st.session_state.get("_raw_par_liste")
+                if _src is not None:
+                    # ⚡ 0 appel API : on puise dans les items déjà chargés par l'analyse
+                    if lid_nom == "watchlist":
+                        items = list(_src.get("Liste de suivi", []))
+                    elif lid_nom == "__ALL__":
+                        items = []
+                        for _lst in _src.values():
+                            items.extend(_lst)
+                    else:
+                        items = list(_src.get(lid_nom, []))
+                elif lid_nom == "watchlist":
                     items = recuperer_watchlist(at)
                 elif lid_nom == "__ALL__":
                     items = recuperer_watchlist(at)
