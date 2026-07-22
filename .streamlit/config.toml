@@ -1,4 +1,5 @@
 [theme]
+
 # Thème Aston Martin F1 2026 - Fond dégradé (vert officiel #00665F)
 primaryColor = "#00A392"
 backgroundColor = "#042E2B"
@@ -11,3 +12,4 @@ base = "dark"
 enableCORS = false
 enableXsrfProtection = false
 headless = true
+enableStaticServing = true
