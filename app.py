@@ -546,11 +546,12 @@ def image_tmdb(tmdb_id, type_c="movie"):
         return st.session_state["_img_cache"][cache_key]
     url = None
     try:
-        r = requests.get(
-            f"https://api.themoviedb.org/3/{type_c}/{tmdb_id}",
-            params={"api_key": TMDB_KEY},
-            timeout=2.5
-        )
+        if len(TMDB_KEY) > 40:  # jeton TMDB v4 (long) -> en-tête Bearer ; clé v3 (courte) -> paramètre
+            r = requests.get(f"https://api.themoviedb.org/3/{type_c}/{tmdb_id}",
+                             headers={"Authorization": f"Bearer {TMDB_KEY}"}, timeout=2.5)
+        else:
+            r = requests.get(f"https://api.themoviedb.org/3/{type_c}/{tmdb_id}",
+                             params={"api_key": TMDB_KEY}, timeout=2.5)
         if r.status_code == 200:
             p = r.json().get("poster_path")
             if p:
@@ -1618,20 +1619,28 @@ def naviguer():
 
 def entete():
     # En-tete compact mais lisible : logo + titre + connexion + deconnexion sur une seule ligne
-    cl, ct, ci, cd = st.columns([0.06, 0.32, 0.47, 0.15])
+    cl, ci, cd = st.columns([0.40, 0.45, 0.15])
     with cl:
-        try:
-            if os.path.exists("logo.png"):   # ton logo perso si présent, sinon le logo Trakt officiel
-                st.image("logo.png", width=46)
-            else:
-                st.image("trakt-logo.svg", width=42)
-        except: pass
-    with ct:
-        st.markdown("<style>@font-face{font-family:'Manrope';src:url('app/static/fonts/Manrope-ExtraBold.ttf');font-weight:800;font-display:swap;}</style>"
-                    "<div style='display:inline-block;'>"
-                    "<h2 style='margin:0; padding:2px 0 0 0; font-family:Manrope,\'DejaVu Sans\',sans-serif; font-weight:800; color:#CEDC00; font-size:1.45em; letter-spacing:0.2px;'>Trakt Smart Lists</h2>"
-                    "<div style='height:3px; width:100%; border-radius:2px; background:linear-gradient(90deg,#00A392,#CEDC00); margin-top:1px;'></div>"
-                    "</div>", unsafe_allow_html=True)
+        _has_word = os.path.exists("wordmark.png")
+        if _has_word:
+            try:
+                st.image("wordmark.png", width=280)   # ton wordmark « esprit Plex »
+            except Exception:
+                pass
+        else:
+            # Repli : icône + titre Manrope lime souligné vert->jaune
+            try:
+                _c1, _c2 = st.columns([0.10, 0.90])
+                with _c1:
+                    st.image("logo.png" if os.path.exists("logo.png") else "trakt-logo.svg", width=46)
+                with _c2:
+                    st.markdown("<style>@font-face{font-family:'Manrope';src:url('app/static/fonts/Manrope-ExtraBold.ttf');font-weight:800;font-display:swap;}</style>"
+                                "<div style='display:inline-block;'>"
+                                "<h2 style='margin:0; padding:2px 0 0 0; font-family:Manrope,\'DejaVu Sans\',sans-serif; font-weight:800; color:#CEDC00; font-size:1.45em; letter-spacing:0.2px;'>Trakt Smart Lists</h2>"
+                                "<div style='height:3px; width:100%; border-radius:2px; background:linear-gradient(90deg,#00A392,#CEDC00); margin-top:1px;'></div>"
+                                "</div>", unsafe_allow_html=True)
+            except Exception:
+                pass
     if "access_token" not in st.session_state:
         st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
         return None
@@ -2271,8 +2280,14 @@ def widget_series_en_cours(utz):
         with ct:
             affiches = st.toggle("🖼️ Affiches", value=False, key="tg_prog_posters",
                                  help="Charge les affiches TMDB, uniquement tant que l'option est active.")
-        if affiches and actives and not any(r.get("tmdb") for r in actives[:12]):
-            st.caption("⚠️ Tes fiches en cache n'ont pas encore d'identifiant d'affiche : clique sur « 🔄 Mettre à jour la progression », elles seront enrichies au passage.")
+        if affiches and actives:
+            _nb_tmdb = sum(1 for r in actives[:12] if r.get("tmdb"))
+            if _nb_tmdb == 0:
+                st.caption("⚠️ Tes fiches en cache n'ont pas encore d'identifiant d'affiche : clique sur « 🔄 Mettre à jour la progression », elles seront enrichies au passage.")
+            elif not TMDB_KEY:
+                st.caption("🔑 Identifiants d'affiches OK, mais la clé **TMDB_API_KEY** est absente des Secrets Streamlit (Settings → Secrets) : sans elle, impossible de charger les posters.")
+            else:
+                st.caption(f"🖼️ Affiches trouvées pour {_nb_tmdb}/{min(len(actives), 12)} série(s).")
         if actives and affiches:
             # Grille compacte de cartes-affiche (4 par ligne, 12 max)
             for i0 in range(0, min(len(actives), 12), 4):
@@ -2321,6 +2336,17 @@ def widget_series_en_cours(utz):
                 st.markdown(f"📺 <b>{_esc_html(r['titre'])}</b>{an}{lien} — **{r['pct']}%** · pas d'épisode vu depuis **{mois} mois** · il en reste {r['reste']} (≈ {format_duree(r['reste_min'] / 60)})", unsafe_allow_html=True)
 
 
+def _relatif_jour(d, maintenant):
+    """Libellé relatif basé sur les DATES (pas les 24 h glissantes) :
+    un épisode vu hier soir = 'hier', même s'il s'est écoulé moins de 24 h."""
+    j = (maintenant.date() - d.date()).days
+    if j <= 0:
+        return "aujourd'hui"
+    if j == 1:
+        return "hier"
+    return f"il y a {j} j"
+
+
 def widget_derniers_vus(utz):
     """🕘 Tes derniers visionnages (films + épisodes mélangés) — repliable, 0 appel."""
     h = st.session_state.get("historique")
@@ -2346,8 +2372,7 @@ def widget_derniers_vus(utz):
     maintenant = datetime.now(utz)
     with st.expander("🕘 Tes derniers visionnages", expanded=False):
         for d, lbl in evts[:12]:
-            j = (maintenant - d.astimezone(utz)).days
-            rel = "aujourd'hui" if j <= 0 else ("hier" if j == 1 else f"il y a {j} j")
+            rel = _relatif_jour(d.astimezone(utz), maintenant)
             st.markdown(f"<span style='color:#9DC5BF; font-size:0.85em;'>{rel}</span> · {lbl}", unsafe_allow_html=True)
 
 
