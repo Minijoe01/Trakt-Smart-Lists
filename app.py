@@ -845,6 +845,8 @@ def recuperer_progressions(at, histo, pseudo, forcer=False):
             return True
         if entree2.get("watched_hist") != vus.get(sid):
             return True  # tu as vu de nouveaux épisodes de cette série
+        if "tmdb" not in entree2:
+            return True  # fiche d'avant l'ère des affiches : on l'enrichit au passage
         try:
             age = (maintenant_utc - datetime.fromisoformat(str(entree2.get("maj", "")))).days
         except Exception:
@@ -1626,8 +1628,10 @@ def entete():
         except: pass
     with ct:
         st.markdown("<style>@font-face{font-family:'Manrope';src:url('app/static/fonts/Manrope-ExtraBold.ttf');font-weight:800;font-display:swap;}</style>"
+                    "<div style='display:inline-block;'>"
                     "<h2 style='margin:0; padding:2px 0 0 0; font-family:Manrope,\'DejaVu Sans\',sans-serif; font-weight:800; color:#CEDC00; font-size:1.45em; letter-spacing:0.2px;'>Trakt Smart Lists</h2>"
-                    "<div style='height:3px; width:118px; border-radius:2px; background:linear-gradient(90deg,#CEDC00,#00A392);'></div>", unsafe_allow_html=True)
+                    "<div style='height:3px; width:100%; border-radius:2px; background:linear-gradient(90deg,#00A392,#CEDC00); margin-top:1px;'></div>"
+                    "</div>", unsafe_allow_html=True)
     if "access_token" not in st.session_state:
         st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
         return None
@@ -2267,6 +2271,8 @@ def widget_series_en_cours(utz):
         with ct:
             affiches = st.toggle("🖼️ Affiches", value=False, key="tg_prog_posters",
                                  help="Charge les affiches TMDB, uniquement tant que l'option est active.")
+        if affiches and actives and not any(r.get("tmdb") for r in actives[:12]):
+            st.caption("⚠️ Tes fiches en cache n'ont pas encore d'identifiant d'affiche : clique sur « 🔄 Mettre à jour la progression », elles seront enrichies au passage.")
         if actives and affiches:
             # Grille compacte de cartes-affiche (4 par ligne, 12 max)
             for i0 in range(0, min(len(actives), 12), 4):
