@@ -79,7 +79,7 @@ Et pour choisir en 1 clic : **21 presets** (⚡ Rapide · 🍿 Soirée cinéma �
 <p align="center"><img src="docs/series.png" alt="Progression des séries" width="820"></p>
 <p align="center"><img src="docs/Doublons.png" alt="Doublons entre vos listes" width="820"></p>
 <p align="center"><img src="docs/quoi_regarder.png" alt="Que regarder ?" width="820"></p>
-<p align="center"><img src="docs/Statistiques.png" alt="Vos statistiques" width="820"></p>
+<p align="center"><img src="docs/statistiques.png" alt="Vos statistiques" width="820"></p>
 
 
 ## 🚀 Utiliser l'app
