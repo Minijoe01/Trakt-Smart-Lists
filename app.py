@@ -763,20 +763,31 @@ def prog_cache_supprimer(pseudo):
         pass
 
 def _progression_fetch_un(at, sid):
-    """1 appel officiel : épisodes diffusés/vus + prochain épisode à regarder."""
+    """Progression officielle d'une série : épisodes diffusés/vus + prochain épisode.
+    Retourne (sid, entrée, debug) ; si la fiche 'show' est absente/incomplète dans la
+    réponse (schéma variable), plan B : l'endpoint /shows/{id}?extended=full."""
     url = f"https://api.trakt.tv/shows/{sid}/progress/watched"
     try:
         r = requests.get(url, headers=entetes(at), params={"extended": "full"}, timeout=15)
-        if r.status_code == 429:  # quota : on respecte Retry-After et on retente UNE fois
+        if r.status_code == 429:
             try:
                 time.sleep(min(float(r.headers.get("Retry-After", 2)), 5))
             except Exception:
                 time.sleep(2)
             r = requests.get(url, headers=entetes(at), params={"extended": "full"}, timeout=15)
         if r.status_code != 200:
-            return sid, None
+            return sid, None, f"progress HTTP {r.status_code}"
         d = r.json()
         sh = d.get("show") or {}
+        dbg = "ok"
+        if not (sh.get("ids") or {}).get("tmdb"):
+            rs = requests.get(f"https://api.trakt.tv/shows/{sid}", headers=entetes(at),
+                              params={"extended": "full"}, timeout=15)
+            if rs.status_code == 200:
+                sh = rs.json() or {}
+                dbg = "planB"
+            else:
+                dbg = f"show HTTP {rs.status_code}"
         ids = sh.get("ids", {}) or {}
         nxt = d.get("next_episode") or None
         return sid, {
@@ -790,9 +801,10 @@ def _progression_fetch_un(at, sid):
             "annee": sh.get("year"),
             "tmdb": ids.get("tmdb"),
             "slug": sh.get("slug") or ids.get("slug") or str(sid),
-        }
-    except Exception:
-        return sid, None
+        }, dbg
+    except Exception as ex2:
+        return sid, None, f"err {type(ex2).__name__}"
+
 
 def _eps_vus_der(histo):
     """Compte par série : épisodes DISTINCTS vus / date de dernière vue / titre.
@@ -858,13 +870,17 @@ def recuperer_progressions(at, histo, pseudo, forcer=False):
             j_vue = 9999
         return age > (7 if j_vue <= 90 else 45)  # active : 7 j de fraîcheur ; au placard : 45 j
     a_faire = [sid for sid in vus if _perime(cache.get(sid), sid)]
+    _dbg = None
     if a_faire:
         resultats = {}
+        _dbg = {"verifiees": len(a_faire), "chargees": 0, "avec_tmdb": 0, "err": None}
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
             futs = [ex.submit(_progression_fetch_un, at, sid) for sid in a_faire]
             for fut in concurrent.futures.as_completed(futs):
                 try:
-                    sid, entree = fut.result()
+                    res = fut.result()
+                    sid, entree = res[0], res[1]
+                    info = res[2] if len(res) > 2 else None
                 except Exception:
                     continue
                 if entree:
@@ -873,9 +889,17 @@ def recuperer_progressions(at, histo, pseudo, forcer=False):
                     entree["watched_hist"] = vus.get(sid, 0)
                     entree["maj"] = maintenant_utc.isoformat()
                     resultats[sid] = entree
+                    _dbg["chargees"] += 1
+                    if entree.get("tmdb"):
+                        _dbg["avec_tmdb"] += 1
+                elif info and not _dbg["err"]:
+                    _dbg["err"] = info
         cache.update(resultats)
         prog_cache_ecrire(pseudo, cache)
-    return {"prog": cache, "vus": vus, "der": der}
+    data = {"prog": cache, "vus": vus, "der": der}
+    if _dbg:
+        data["debug"] = _dbg
+    return data
 
 def recuperer_listes(at):
     try:
@@ -1621,10 +1645,16 @@ def entete():
     # En-tete compact mais lisible : logo + titre + connexion + deconnexion sur une seule ligne
     cl, ci, cd = st.columns([0.40, 0.45, 0.15])
     with cl:
-        _has_word = os.path.exists("wordmark.png")
-        if _has_word:
+        _has_word_static = os.path.exists(os.path.join("static", "wordmark.png"))
+        _has_word = _has_word_static or os.path.exists("wordmark.png")
+        if _has_word_static:
+            # Statique = net à toutes les densités + largeur responsive (grand sur PC, lisible sur GSM)
+            st.markdown("<img src='app/static/wordmark.png' alt='Trakt Smart Lists' "
+                        "style='width:min(300px,62vw); height:auto; display:block; margin:2px 0 4px 0;'>",
+                        unsafe_allow_html=True)
+        elif _has_word:
             try:
-                st.image("wordmark.png", width=280)   # ton wordmark « esprit Plex »
+                st.image("wordmark.png", width=280)   # repli : wordmark a la racine
             except Exception:
                 pass
         else:
@@ -2280,6 +2310,10 @@ def widget_series_en_cours(utz):
         with ct:
             affiches = st.toggle("🖼️ Affiches", value=False, key="tg_prog_posters",
                                  help="Charge les affiches TMDB, uniquement tant que l'option est active.")
+        _dbg = (st.session_state.get("progressions") or {}).get("debug")
+        if _dbg:
+            st.caption(f"🛰️ Dernière mise à jour : **{_dbg['chargees']}/{_dbg['verifiees']}** série(s) re-téléchargée(s) · affiches trouvées : **{_dbg['avec_tmdb']}**"
+                       + (f" · ⚠️ {_dbg['err']}" if _dbg.get("err") else ""))
         if affiches and actives:
             _nb_tmdb = sum(1 for r in actives[:12] if r.get("tmdb"))
             if _nb_tmdb == 0:
