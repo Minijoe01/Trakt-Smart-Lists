@@ -513,13 +513,6 @@ def sauvegarder_connexion(tokens):
     st.session_state["access_token"] = tokens["access_token"]
     st.session_state["refresh_token"] = tokens["refresh_token"]
     st.session_state["token_heure"] = time.time()
-    # Une connexion réussie lève le blocage posé par une déconnexion précédente.
-    # remove() seul est parfois ignoré par le composant cookies -> on ÉCRASE le
-    # marqueur avec "0" (une écriture, fiable à 100 %) puis remove() en secours.
-    try: cookies.set("tsl_logout", "0", expires=datetime.now() + timedelta(days=365))
-    except Exception: pass
-    try: cookies.remove("tsl_logout")
-    except Exception: pass
     try:
         cookies.set("trakt_rt", tokens["refresh_token"], expires=datetime.now() + timedelta(days=90))
     except Exception:
@@ -527,15 +520,12 @@ def sauvegarder_connexion(tokens):
     time.sleep(0.3)
 
 def oublier_connexion():
-    # 1) Révoque le token chez Trakt -> la reconnexion auto devient impossible
+    # La révocation côté Trakt tue le refresh token : même si l'effacement du
+    # cookie capotait, la reconnexion auto échouerait sur ce token mort et
+    # réessaierait l'effacement à chaque visite. Pas de cookie supplémentaire :
+    # une seule opération par passage, comme la version éprouvée.
     _revoquer_token_trakt(st.session_state.get("refresh_token") or st.session_state.get("access_token"))
-    # 2) Marqueur persistant : la déconnexion tient d'une visite à l'autre
-    try: cookies.set("tsl_logout", "1", expires=datetime.now() + timedelta(days=365))
-    except Exception: pass
-    # 3) Efface le cookie de session (double méthode : remove + écrasement expiré)
     try: cookies.remove("trakt_rt")
-    except Exception: pass
-    try: cookies.set("trakt_rt", "", expires=datetime.now() - timedelta(days=1))
     except Exception: pass
     time.sleep(0.5)
     st.session_state.clear()
@@ -4974,9 +4964,7 @@ def page_sauvegarde():
 # ==================================================
 
 if "access_token" not in st.session_state:
-    try: deconnecte = cookies.get("tsl_logout") == "1"
-    except Exception: deconnecte = False
-    rt = None if deconnecte else cookies.get("trakt_rt")
+    rt = cookies.get("trakt_rt")
     if rt:
         tok = rafraichir_token(rt)
         if tok:
