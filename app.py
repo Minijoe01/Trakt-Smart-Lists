@@ -513,7 +513,11 @@ def sauvegarder_connexion(tokens):
     st.session_state["access_token"] = tokens["access_token"]
     st.session_state["refresh_token"] = tokens["refresh_token"]
     st.session_state["token_heure"] = time.time()
-    # Une connexion réussie lève le blocage posé par une déconnexion précédente
+    # Une connexion réussie lève le blocage posé par une déconnexion précédente.
+    # remove() seul est parfois ignoré par le composant cookies -> on ÉCRASE le
+    # marqueur avec "0" (une écriture, fiable à 100 %) puis remove() en secours.
+    try: cookies.set("tsl_logout", "0", expires=datetime.now() + timedelta(days=365))
+    except Exception: pass
     try: cookies.remove("tsl_logout")
     except Exception: pass
     try:
