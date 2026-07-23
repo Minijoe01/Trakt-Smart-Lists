@@ -9,7 +9,7 @@
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.35%2B-CEDC00?style=for-the-badge&logo=streamlit&logoColor=black)](https://streamlit.io/)
 [![Trakt API](https://img.shields.io/badge/API-Trakt%20v2-ED2224?style=for-the-badge)](https://trakt.docs.apiary.io/)
 
-*EN summary: a Streamlit web app that cross-references your Trakt history with your lists, cleans them up, and recommends what to watch next with a transparent, personal score. French UI.*
+*Une application web Streamlit qui croise votre historique Trakt avec vos listes, les nettoie et vous recommande quoi regarder ensuite grâce à un score personnalisé et transparent. Interface en français.*
 
 </div>
 
