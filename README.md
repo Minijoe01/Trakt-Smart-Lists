@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="wordmark.png" alt="Trakt Smart Lists" width="340">
+<img src="static/wordmark.png" alt="Trakt Smart Lists" width="340">
 
 **Range tes listes Trakt, retrouve tes progressions fantômes, et sache ENFIN quoi regarder ce soir.**
 
