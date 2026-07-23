@@ -555,7 +555,7 @@ def image_tmdb(tmdb_id, type_c="movie"):
         if r.status_code == 200:
             p = r.json().get("poster_path")
             if p:
-                url = f"https://image.tmdb.org/t/p/w200{p}"
+                url = f"https://image.tmdb.org/t/p/w500{p}"  # w500 : net sur écrans haute densité (chargés uniquement à l'affichage)
     except Exception:
         pass
     # Mettre en cache (None aussi pour ne pas reessayer un id qui echoue)
@@ -1633,7 +1633,11 @@ def naviguer():
     with st.sidebar:
         st.markdown('<p class="section-menu-title">Menu</p>', unsafe_allow_html=True)
         page = st.radio("Navigation", PAGES, index=PAGES.index(st.session_state["page_active"]), label_visibility="collapsed", key="nav")
-        st.caption("🍿 Compatible avec Trakt — *Powered by the Trakt API*, sans affiliation.")
+        _ic = (f"<img src='app/static/logo_small.png' alt='' style='height:1.05em; vertical-align:-0.18em; margin-right:5px;'>"
+               if os.path.exists(os.path.join("static", "logo_small.png")) else "🍿 ")
+        st.markdown(f"<div style='color:#9DC5BF; font-size:0.85em; padding:6px 0 0 4px; line-height:1.35;'>"
+                    f"{_ic}Compatible avec Trakt — <i>Powered by the Trakt API</i>, sans affiliation.</div>",
+                    unsafe_allow_html=True)
     st.session_state["page_active"] = page
     return page
 
