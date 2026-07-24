@@ -406,8 +406,11 @@ st.markdown("""
     p, li, label { color: var(--am-text) !important; }
     .stCaption { color: var(--am-text-muted) !important; }
     button[kind="header"] { background: var(--am-bg-card) !important; backdrop-filter: blur(14px); border-radius:12px !important; border: 1px solid var(--am-border) !important; }
-    div[role="progressbar"] { background: linear-gradient(90deg, var(--am-lime) 0%, var(--am-yellow) 100%) !important; }
-    div[role="progressbar"] > div { background: var(--am-green-aston) !important; }
+    /* Barres de progression Streamlit : on cible le hook STABLE data-testid.
+       (role="progressbar" est un FAUX AMI : dans les versions récentes, c'est un
+       wrapper invisible de react-aria, pas la piste — le cibler peint le mauvais élément.) */
+    div[data-testid="stProgressBarTrack"] { background: linear-gradient(90deg, var(--am-lime) 0%, var(--am-yellow) 100%) !important; }
+    div[data-testid="stProgressBarTrack"] > div { background: var(--am-green-aston) !important; }
 
     .ghost-card {
         background: var(--am-bg-card);
