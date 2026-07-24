@@ -67,6 +67,7 @@ st.markdown("""
         --am-green-aston: #00524B;
         --am-green-dark: #021412;
         --am-lime: #CEDC00;   /* Jaune fluo Aston pour progress bars et accents */
+        --am-yellow: #FFFF00; /* Jaune pur : extremite droite des pistes de progression */
         --am-mint: #00D084;   /* Vert menthe pour les warnings/alertes */
         --am-bg-card: rgba(8, 55, 50, 0.75);
         --am-bg-card-hover: rgba(12, 75, 68, 0.85);
@@ -405,7 +406,8 @@ st.markdown("""
     p, li, label { color: var(--am-text) !important; }
     .stCaption { color: var(--am-text-muted) !important; }
     button[kind="header"] { background: var(--am-bg-card) !important; backdrop-filter: blur(14px); border-radius:12px !important; border: 1px solid var(--am-border) !important; }
-    div[role="progressbar"] > div { background: linear-gradient(90deg, var(--am-green) 0%, var(--am-lime) 100%) !important; }
+    div[role="progressbar"] { background: linear-gradient(90deg, var(--am-lime) 0%, var(--am-yellow) 100%) !important; }
+    div[role="progressbar"] > div { background: var(--am-green-aston) !important; }
 
     .ghost-card {
         background: var(--am-bg-card);
@@ -422,11 +424,11 @@ st.markdown("""
     .ghost-card.carte-important:hover { transform: none; border-left:4px solid var(--am-lime); background: var(--am-bg-card); }
     .ghost-title { font-size:1.1em; font-weight:700; color: var(--am-text); margin-bottom:6px; }
     .ghost-meta { font-size:0.9em; color: var(--am-text-muted); margin-bottom:14px; }
-    .progress-bar-container { width:100%; height:12px; background:rgba(6,59,55,0.8); border-radius:8px; overflow:hidden; }
+    .progress-bar-container { width:100%; height:12px; background:linear-gradient(90deg, var(--am-lime) 0%, var(--am-yellow) 100%); border-radius:8px; overflow:hidden; }
     .progress-bar-fill { height:100%; border-radius:8px; transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
-    .progress-low { background: linear-gradient(90deg, var(--am-green-aston) 0%, var(--am-green) 100%); }
-    .progress-mid { background: linear-gradient(90deg, var(--am-green) 0%, var(--am-lime) 100%); }
-    .progress-high { background: linear-gradient(90deg, var(--am-lime) 0%, #E8F064 100%); }
+    /* Remplissage : vert Aston uni, contraste maximal sur la piste jaune.
+       Les 3 classes historiques sont conservees (le markup les utilise). */
+    .progress-low, .progress-mid, .progress-high { background: var(--am-green-aston); }
     /* Barre Streamlit du haut : rendue transparante avec effet glass, meme theme que les cartes */
     header[data-testid="stHeader"] {
         background: rgba(2, 20, 18, 0.7) !important;
