@@ -410,7 +410,7 @@ st.markdown("""
        (role="progressbar" est un FAUX AMI : dans les versions récentes, c'est un
        wrapper invisible de react-aria, pas la piste — le cibler peint le mauvais élément.) */
     div[data-testid="stProgressBarTrack"] { background: linear-gradient(90deg, var(--am-lime) 0%, var(--am-yellow) 100%) !important; }
-    div[data-testid="stProgressBarTrack"] > div { background: var(--am-green-aston) !important; }
+    div[data-testid="stProgressBarTrack"] > div { background: var(--am-green) !important; }
 
     .ghost-card {
         background: var(--am-bg-card);
@@ -431,7 +431,7 @@ st.markdown("""
     .progress-bar-fill { height:100%; border-radius:8px; transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
     /* Remplissage : vert Aston uni, contraste maximal sur la piste jaune.
        Les 3 classes historiques sont conservees (le markup les utilise). */
-    .progress-low, .progress-mid, .progress-high { background: var(--am-green-aston); }
+    .progress-low, .progress-mid, .progress-high { background: var(--am-green); }
     /* Barre Streamlit du haut : rendue transparante avec effet glass, meme theme que les cartes */
     header[data-testid="stHeader"] {
         background: rgba(2, 20, 18, 0.7) !important;
